@@ -237,6 +237,7 @@ impl TUI {
     delegate!(new_server_tab(serv_name: &str, alias: Option<String>,));
     delegate!(close_server_tab(serv_name: &str,));
     delegate!(new_chan_tab(serv_name: &str, chan: &ChanNameRef,));
+    delegate!(focus_chan_tab(serv_name: &str, chan: &ChanNameRef,));
     delegate!(close_chan_tab(serv_name: &str, chan: &ChanNameRef,));
     delegate!(close_user_tab(serv_name: &str, nick: &str,));
     delegate!(add_client_msg(msg: &str, target: &MsgTarget,));

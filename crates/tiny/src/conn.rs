@@ -329,6 +329,7 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
 
             if nick == client.get_nick() {
                 ui.new_chan_tab(serv, &chan);
+                ui.focus_chan_tab(serv, &chan);
             } else {
                 let nick = wire::drop_nick_prefix(&nick);
                 let ts = Some(time::now());

@@ -506,6 +506,12 @@ impl TUI {
         }
     }
 
+    pub(crate) fn focus_chan_tab(&mut self, serv: &str, chan: &ChanNameRef) {
+        if let Some(tab_idx) = self.find_chan_tab_idx(serv, chan) {
+            self.select_tab(tab_idx);
+        }
+    }
+
     pub(crate) fn close_chan_tab(&mut self, serv: &str, chan: &ChanNameRef) {
         if let Some(tab_idx) = self.find_chan_tab_idx(serv, chan) {
             self.tabs.remove(tab_idx);

@@ -52,6 +52,7 @@ impl UI {
 
     delegate!(close_server_tab(serv: &str,));
     delegate!(new_chan_tab(serv: &str, chan: &ChanNameRef,));
+    delegate_ui!(focus_chan_tab(serv: &str, chan: &ChanNameRef,));
     delegate!(close_chan_tab(serv: &str, chan: &ChanNameRef,));
     delegate!(close_user_tab(serv: &str, nick: &str,));
     delegate!(add_client_msg(msg: &str, target: &MsgTarget,));

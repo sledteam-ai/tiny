@@ -1,6 +1,6 @@
 use crate::conn;
 use crate::ui::UI;
-use libtiny_common::ChanName;
+use libtiny_common::{ChanName, MsgSource};
 use libtiny_tui::TUI;
 use libtiny_tui::test_utils::expect_screen;
 use libtiny_wire::{Cmd, Msg, MsgTarget, Pfx};
@@ -91,6 +91,39 @@ where
 }
 
 #[test]
+fn test_own_join_focuses_channel_tab() {
+    run_test(
+        "osa1".to_owned(),
+        |TestSetup {
+             tui,
+             snd_input_ev,
+             snd_conn_ev,
+         }| async move {
+            let chan = ChanName::new("#camp".to_owned());
+            let join = Msg {
+                pfx: Some(Pfx::User {
+                    nick: "osa1".to_owned(),
+                    user: "a@b".to_owned(),
+                }),
+                cmd: Cmd::JOIN { chan: chan.clone() },
+            };
+
+            snd_conn_ev.send(client::Event::Msg(join)).await.unwrap();
+            yield_(5).await;
+
+            assert!(!snd_input_ev.is_closed());
+            assert_eq!(
+                tui.current_tab(),
+                Some(MsgSource::Chan {
+                    serv: SERV_NAME.to_owned(),
+                    chan,
+                })
+            );
+        },
+    )
+}
+
+#[test]
 fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
     run_test(
         "osa1".to_owned(),
@@ -154,9 +187,6 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
             yield_(5).await;
 
             // Check channel tab
-            next_tab(&snd_input_ev).await; // server tab
-            next_tab(&snd_input_ev).await; // channel tab
-            yield_(5).await;
             tui.draw();
 
             #[rustfmt::skip]
