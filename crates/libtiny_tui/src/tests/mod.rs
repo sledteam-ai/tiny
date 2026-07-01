@@ -1,6 +1,6 @@
 use std::panic::Location;
 
-use libtiny_common::{ChanNameRef, MsgTarget};
+use libtiny_common::{ChanNameRef, MsgSource, MsgTarget};
 use term_input::{Event, Key};
 
 use crate::test_utils::expect_screen;
@@ -27,8 +27,89 @@ fn init_screen() {
         "|Any mentions to you |
          |will be listed here.|
          |                    |
-         |mentions            |";
+         |                    |";
     expect_screen(screen, &tui.get_front_buffer(), 20, 4, Location::caller());
+}
+
+#[test]
+fn mentions_tab_is_hidden_from_tab_bar() {
+    let mut tui = TUI::new_test(20, 4);
+    let tabs = tui.get_tabs();
+    assert_eq!(tabs.len(), 1);
+    assert!(tabs[0].hidden);
+
+    tui.new_server_tab("mars.example.org", None);
+    let tabs = tui.get_tabs();
+    assert_eq!(tabs[1].switch, Some('m'));
+
+    tui.draw();
+
+    #[rustfmt::skip]
+    let screen =
+        "|Any mentions to you |
+         |will be listed here.|
+         |                    |
+         |mars.example.org    |";
+    expect_screen(screen, &tui.get_front_buffer(), 20, 4, Location::caller());
+}
+
+#[test]
+fn tab_navigation_skips_hidden_mentions_tab() {
+    let mut tui = TUI::new_test(30, 4);
+    let serv = "irc.server_1.org";
+    let chan = ChanNameRef::new("#chan");
+    tui.new_server_tab(serv, None);
+    tui.new_chan_tab(serv, chan);
+
+    tui.next_tab();
+    assert_eq!(
+        tui.current_tab(),
+        &MsgSource::Serv {
+            serv: serv.to_owned(),
+        }
+    );
+
+    tui.next_tab();
+    assert_eq!(
+        tui.current_tab(),
+        &MsgSource::Chan {
+            serv: serv.to_owned(),
+            chan: chan.to_owned(),
+        }
+    );
+
+    tui.next_tab();
+    assert_eq!(
+        tui.current_tab(),
+        &MsgSource::Serv {
+            serv: serv.to_owned(),
+        }
+    );
+
+    tui.prev_tab();
+    assert_eq!(
+        tui.current_tab(),
+        &MsgSource::Chan {
+            serv: serv.to_owned(),
+            chan: chan.to_owned(),
+        }
+    );
+}
+
+#[test]
+fn hidden_mentions_tab_still_receives_messages() {
+    let mut tui = TUI::new_test(20, 4);
+    let target = MsgTarget::Server { serv: "mentions" };
+
+    tui.add_msg("osa1 in x.y.z:#camp: hello", time::empty_tm(), &target);
+
+    let lines = tui.tab_lines_text(&target).unwrap();
+    assert!(lines.iter().any(|line| line.contains("Any mentions")));
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("osa1 in x.y.z:#camp: hello"))
+    );
 }
 
 #[test]
@@ -59,7 +140,7 @@ fn close_rightmost_tab() {
         "|                    |
          |                    |
          |                    |
-         |< irc.server_1.org  |";
+         |irc.server_1.org    |";
     expect_screen(screen, &tui.get_front_buffer(), 20, 4, Location::caller());
 
     // Scroll left again, left arrow should disappear this time.
@@ -71,7 +152,7 @@ fn close_rightmost_tab() {
         "|Any mentions to you |
          |will be listed here.|
          |                    |
-         |mentions            |";
+         |                    |";
     expect_screen(screen, &tui.get_front_buffer(), 20, 4, Location::caller());
 }
 
@@ -108,7 +189,7 @@ fn small_screen_1() {
     let screen =
         "|00:00 +123456 +abcdef   |
          |osa1:                   |
-         |< irc.server_1.org #chan|";
+         |irc.server_1.org #chan  |";
 
     expect_screen(screen, &tui.get_front_buffer(), 24, 3, Location::caller());
 
@@ -119,7 +200,7 @@ fn small_screen_1() {
     let screen =
         "|00:00 +123456 +abcdef          |
          |osa1:                          |
-         |mentions irc.server_1.org #chan|";
+         |irc.server_1.org #chan         |";
 
     expect_screen(screen, &tui.get_front_buffer(), 31, 3, Location::caller());
 }
@@ -180,7 +261,7 @@ fn ctrl_w() {
     let screen =
         "|                              |
          |osa1: dkf aslkdfj aslkdfj asf |
-         |< irc.server_1.org #chan      |";
+         |irc.server_1.org #chan        |";
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
     tui.handle_input_event(Event::Key(Key::Ctrl('w')), &mut None);
@@ -190,7 +271,7 @@ fn ctrl_w() {
     let screen =
         "|                              |
          |osa1: asldkf aslkdfj aslkdfj  |
-         |< irc.server_1.org #chan      |";
+         |irc.server_1.org #chan        |";
 
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
@@ -205,14 +286,14 @@ fn ctrl_w() {
     let screen =
         "|                              |
          |osa1:  asldkf aslkdfj         |
-         |< irc.server_1.org #chan      |";
+         |irc.server_1.org #chan        |";
     */
 
     #[rustfmt::skip]
     let screen =
         "|                              |
          |osa1:  asldkf asldkf aslkdfj  |
-         |< irc.server_1.org #chan      |";
+         |irc.server_1.org #chan        |";
 
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
@@ -223,7 +304,7 @@ fn ctrl_w() {
     let screen =
         "|                              |
          |osa1: alskdfj asldkf asldkf   |
-         |< irc.server_1.org #chan      |";
+         |irc.server_1.org #chan        |";
 
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 }
@@ -266,7 +347,7 @@ fn test_text_field_wrap() {
      |00:00 test test test                    |
      |x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
      |bbbbb                                   |
-     |mentions chat.freenode.net              |";
+     |chat.freenode.net                       |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 8, Location::caller());
 
@@ -283,7 +364,7 @@ fn test_text_field_wrap() {
      |                                              |
      |00:00 test test test                          |
      |x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbb |
-     |mentions chat.freenode.net                    |";
+     |chat.freenode.net                             |";
 
     expect_screen(screen, &tui.get_front_buffer(), 46, 8, Location::caller());
 
@@ -308,7 +389,7 @@ fn test_text_field_wrap() {
      |                                        |
      |00:00 test test test                    |
      |x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
-     |mentions chat.freenode.net              |";
+     |chat.freenode.net                       |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 8, Location::caller());
 
@@ -329,7 +410,7 @@ fn test_text_field_wrap() {
      |                              |
      |00:00 test test test          |
      |x: aaaaaaaaaaaaaaaaaaaaabbbbb |
-     |mentions chat.freenode.net    |";
+     |chat.freenode.net             |";
 
     expect_screen(screen, &tui.get_front_buffer(), 30, 8, Location::caller());
 
@@ -345,7 +426,7 @@ fn test_text_field_wrap() {
      |00:00 test test test                    |
      |x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab|
      |bbbb                                    |
-     |mentions chat.freenode.net              |";
+     |chat.freenode.net                       |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 8, Location::caller());
 
@@ -375,7 +456,7 @@ fn test_text_field_wrap() {
      |00:00 test test test                    |
      |x: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  |
      |bbbbb                                   |
-     |mentions chat.freenode.net              |";
+     |chat.freenode.net                       |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 8, Location::caller());
 

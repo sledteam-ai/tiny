@@ -118,6 +118,11 @@ impl MessagingUI {
         self.input_field.get_nick()
     }
 
+    #[cfg(test)]
+    pub(crate) fn lines_text(&self) -> Vec<String> {
+        self.msg_area.lines_text()
+    }
+
     pub(crate) fn draw(&mut self, tb: &mut Termbox, colors: &Colors, pos_x: i32, pos_y: i32) {
         match &self.exit_dialogue {
             Some(exit_dialogue) => {

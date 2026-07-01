@@ -244,6 +244,15 @@ impl Line {
             }
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> String {
+        self.segments
+            .iter()
+            .chain(std::iter::once(&self.current_seg))
+            .map(|seg| seg.string.as_str())
+            .collect()
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

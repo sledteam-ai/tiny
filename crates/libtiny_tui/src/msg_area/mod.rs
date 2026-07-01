@@ -74,6 +74,11 @@ impl MsgArea {
         self.lines.len()
     }
 
+    #[cfg(test)]
+    pub(crate) fn lines_text(&self) -> Vec<String> {
+        self.lines.iter().map(Line::text).collect()
+    }
+
     pub(crate) fn resize(&mut self, width: i32, height: i32) {
         self.width = width;
         let old_height = self.height;

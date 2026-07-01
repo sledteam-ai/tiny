@@ -64,7 +64,7 @@ fn test_alignment_long_string() {
          |00:00         osa1: 12345678901234567890|
          |                    1234567890          |
          |osa1:                                   |
-         |mentions irc.server_1.org #chan         |";
+         |irc.server_1.org #chan                  |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
 }
@@ -102,7 +102,7 @@ fn setup_tui(layout: Layout) -> (TUI, MsgTarget<'static>) {
         |                                        |
         |                                        |
         |osa1:                                   |
-        |mentions irc.server_1.org #chan         |";
+        |irc.server_1.org #chan                  |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
 
@@ -149,7 +149,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00         osa1: hi                  |
              |                    +test               |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -172,7 +172,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00         osa1: hi                  |
              |00:01               +test               |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -194,7 +194,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00         osa1: hi                  |
              |              osa1: test                |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -217,7 +217,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00         osa1: hi                  |
              |00:01         osa1: test                |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -239,7 +239,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00               +test               |
              |              osa1: hi                  |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -262,7 +262,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00               +test               |
              |00:01         osa1: hi                  |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -281,7 +281,7 @@ fn test_aligned_layout_activity_timestamp() {
              |                                        |
              |00:00               +test1 +test2       |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -301,7 +301,7 @@ fn test_aligned_layout_activity_timestamp() {
              |00:00               +test1              |
              |00:01               +test2              |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -327,7 +327,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 osa1: hi                          |
              |+test                                   |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -350,7 +350,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 osa1: hi                          |
              |00:01 +test                             |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -372,7 +372,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 osa1: hi                          |
              |osa1: test                              |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -395,7 +395,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 osa1: hi                          |
              |00:01 osa1: test                        |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -417,7 +417,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 +test                             |
              |osa1: hi                                |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -440,7 +440,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 +test                             |
              |00:01 osa1: hi                          |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -459,7 +459,7 @@ fn test_compact_layout_activity_timestamp() {
              |                                        |
              |00:00 +test1 +test2                     |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -479,7 +479,7 @@ fn test_compact_layout_activity_timestamp() {
              |00:00 +test1                            |
              |00:01 +test2                            |
              |osa1:                                   |
-             |mentions irc.server_1.org #chan         |";
+             |irc.server_1.org #chan                  |";
 
         expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
     }
@@ -502,7 +502,7 @@ fn test_clear_timestamp_aligned() {
          |                                        |
          |00:00               +test2              |
          |osa1:                                   |
-         |mentions irc.server_1.org #chan         |";
+         |irc.server_1.org #chan                  |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
 }
@@ -524,7 +524,7 @@ fn test_clear_timestamp_compact() {
          |                                        |
          |00:00 +test2                            |
          |osa1:                                   |
-         |mentions irc.server_1.org #chan         |";
+         |irc.server_1.org #chan                  |";
 
     expect_screen(screen, &tui.get_front_buffer(), 40, 5, Location::caller());
 }

@@ -7,19 +7,18 @@
 #![allow(clippy::needless_collect)]
 
 use std::borrow::Borrow;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::{self, SplitWhitespace};
 use time::Tm;
 
-use crate::config::{Colors, Config, Style, TabConfig, TabConfigs, parse_config};
+use crate::config::{Colors, Config, TabConfig, TabConfigs, parse_config};
 use crate::editor;
 use crate::key_map::{KeyAction, KeyMap};
 use crate::messaging::{MessagingUI, Timestamp};
 use crate::msg_area::Layout;
 use crate::notifier::Notifier;
-use crate::tab::Tab;
+use crate::tab::{Tab, tab_style};
 use crate::widget::WidgetRet;
 
 use libtiny_common::{ChanNameRef, MsgSource, MsgTarget, TabStyle};
@@ -172,6 +171,7 @@ impl TUI {
         // Init "mentions" tab. This needs to happen right after creating the TUI to be able to
         // show any errors in TUI.
         tui.new_server_tab("mentions", None);
+        tui.hide_server_tab("mentions");
         tui.add_client_msg(
             "Any mentions to you will be listed here.",
             &MsgTarget::Server { serv: "mentions" },
@@ -397,7 +397,7 @@ impl TUI {
             // Maps a switch key to number of times it's used
             let mut switch_keys: HashMap<char, u16> = HashMap::with_capacity(self.tabs.len());
 
-            for tab in &self.tabs {
+            for tab in self.tabs.iter().filter(|tab| tab.is_visible()) {
                 if let Some(key) = tab.switch {
                     *switch_keys.entry(key).or_default() += 1;
                 }
@@ -441,9 +441,16 @@ impl TUI {
                 ),
                 src,
                 style: TabStyle::Normal,
+                hidden: false,
                 switch,
             },
         );
+    }
+
+    fn hide_server_tab(&mut self, serv: &str) {
+        if let Some(tab_idx) = self.find_serv_tab_idx(serv) {
+            self.tabs[tab_idx].hide();
+        }
     }
 
     /// Returns index of the new tab if a new tab is created.
@@ -753,50 +760,9 @@ impl TUI {
         for tab in &mut self.tabs {
             tab.widget.resize(self.width, self.height - 1);
         }
-        // scroll the tab bar so that currently active tab is still visible
-        let (mut tab_left, mut tab_right) = self.rendered_tabs();
-        if tab_left == tab_right {
-            // nothing to show
-            return;
-        }
-        while self.active_idx < tab_left || self.active_idx >= tab_right {
-            if self.active_idx >= tab_right {
-                // scroll right
-                self.h_scroll += self.tabs[tab_left].width() + 1;
-            } else if self.active_idx < tab_left {
-                // scroll left
-                self.h_scroll -= self.tabs[tab_left - 1].width() + 1;
-            }
-            let (tab_left_, tab_right_) = self.rendered_tabs();
-            tab_left = tab_left_;
-            tab_right = tab_right_;
-        }
-        // the selected tab is visible. scroll to the left as much as possible
-        // to make more tabs visible.
-        let mut num_visible = tab_right - tab_left;
-        loop {
-            if tab_left == 0 {
-                break;
-            }
-            // save current scroll value
-            let scroll_orig = self.h_scroll;
-            // scoll to the left
-            self.h_scroll -= self.tabs[tab_left - 1].width() + 1;
-            // get new bounds
-            let (tab_left_, tab_right_) = self.rendered_tabs();
-            // commit if these two conditions hold
-            let num_visible_ = tab_right_ - tab_left_;
-            let more_tabs_visible = num_visible_ > num_visible;
-            let selected_tab_visible = self.active_idx >= tab_left_ && self.active_idx < tab_right_;
-            if !(more_tabs_visible && selected_tab_visible) {
-                // revert scroll value and abort
-                self.h_scroll = scroll_orig;
-                break;
-            }
-            // otherwise commit
-            tab_left = tab_left_;
-            num_visible = num_visible_;
-        }
+        let max_scroll = (self.visible_tabs_width() - self.width).max(0);
+        self.h_scroll = self.h_scroll.min(max_scroll);
+        self.ensure_tab_visible(self.active_idx);
 
         // redraw after resize
         self.draw()
@@ -828,88 +794,123 @@ impl TUI {
 ////////////////////////////////////////////////////////////////////////////////
 // Rendering
 
-fn arrow_style(tabs: &[Tab], colors: &Colors) -> Style {
-    let tab_style = tabs
-        .iter()
-        .map(|tab| tab.style)
-        .max()
-        .unwrap_or(TabStyle::Normal);
-    match tab_style {
-        TabStyle::Normal => colors.tab_normal,
-        TabStyle::JoinOrPart => colors.tab_joinpart,
-        TabStyle::NewMsg => colors.tab_new_msg,
-        TabStyle::Highlight => colors.tab_highlight,
-    }
-}
-
 impl TUI {
+    fn visible_tab_idxs(&self) -> Vec<usize> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, tab)| tab.is_visible().then_some(idx))
+            .collect()
+    }
+
+    fn visible_tabs_width(&self) -> i32 {
+        let mut width = 0;
+        let mut first = true;
+        for tab_idx in self.visible_tab_idxs() {
+            if first {
+                first = false;
+            } else {
+                width += 1;
+            }
+            width += self.tabs[tab_idx].width();
+        }
+        width
+    }
+
+    fn visible_tab_offset(&self, tab_idx: usize) -> Option<i32> {
+        let mut offset = 0;
+        for visible_idx in self.visible_tab_idxs() {
+            if visible_idx == tab_idx {
+                return Some(offset);
+            }
+            offset += self.tabs[visible_idx].width() + 1;
+        }
+        None
+    }
+
     fn draw_left_arrow(&self) -> bool {
         self.h_scroll > 0
     }
 
     fn draw_right_arrow(&self) -> bool {
-        let w1 = self.h_scroll + self.width;
-        let w2 = {
-            let mut w = if self.draw_left_arrow() { 2 } else { 0 };
-            let last_tab_idx = self.tabs.len() - 1;
-            for (tab_idx, tab) in self.tabs.iter().enumerate() {
-                w += tab.width();
-                if tab_idx != last_tab_idx {
-                    w += 1;
-                }
-            }
-            w
-        };
-
-        w2 > w1
+        let visible_width = self.visible_tabs_width();
+        let available_width = self.width - if self.draw_left_arrow() { 2 } else { 0 };
+        visible_width > self.h_scroll + available_width
     }
 
-    // right one is exclusive
-    fn rendered_tabs(&self) -> (usize, usize) {
-        if self.tabs.is_empty() {
-            return (0, 0);
+    fn visible_tabs_before_offset(&self, offset: i32) -> Vec<usize> {
+        let mut current_offset = 0;
+        let mut ret = vec![];
+        for tab_idx in self.visible_tab_idxs() {
+            let tab_width = self.tabs[tab_idx].width() + 1;
+            if current_offset + tab_width > offset {
+                break;
+            }
+            ret.push(tab_idx);
+            current_offset += tab_width;
+        }
+        ret
+    }
+
+    fn rendered_tabs(&self) -> Vec<usize> {
+        let visible_idxs = self.visible_tab_idxs();
+        if visible_idxs.is_empty() {
+            return vec![];
         }
 
-        let mut i = 0;
+        let mut start = 0;
+        let mut offset = 0;
+        while start < visible_idxs.len() - 1 {
+            let tab_width = self.tabs[visible_idxs[start]].width() + 1;
+            if offset + tab_width > self.h_scroll {
+                break;
+            }
+            offset += tab_width;
+            start += 1;
+        }
 
-        {
-            let mut skip = self.h_scroll;
-            while skip > 0 && i < self.tabs.len() - 1 {
-                skip -= self.tabs[i].width() + 1;
-                i += 1;
+        let mut width_left = self.width;
+        if self.draw_left_arrow() {
+            width_left -= 2;
+        }
+        if self.draw_right_arrow() {
+            width_left -= 2;
+        }
+
+        let mut rendered = vec![];
+        for (idx, tab_idx) in visible_idxs[start..].iter().copied().enumerate() {
+            let width = self.tabs[tab_idx].width();
+            if width > width_left {
+                break;
+            }
+            rendered.push(tab_idx);
+            width_left -= width;
+            if idx != visible_idxs.len() - start - 1 {
+                width_left -= 1;
             }
         }
 
-        // drop tabs overflow on the right side
-        let mut j = i;
-        {
-            // how much space left on screen
-            let mut width_left = self.width;
-            if self.draw_left_arrow() {
-                width_left -= 2;
-            }
-            if self.draw_right_arrow() {
-                width_left -= 2;
-            }
-            // drop any tabs that overflows from the screen
-            for (tab_idx, tab) in self.tabs[i..].iter().enumerate() {
-                if tab.width() > width_left {
-                    break;
-                } else {
-                    j += 1;
-                    width_left -= tab.width();
-                    if tab_idx != self.tabs.len() - i {
-                        width_left -= 1;
-                    }
-                }
-            }
+        rendered
+    }
+
+    fn ensure_tab_visible(&mut self, tab_idx: usize) {
+        if !self.tabs[tab_idx].is_visible() {
+            return;
         }
 
-        debug_assert!(i < self.tabs.len());
-        debug_assert!(j <= self.tabs.len());
-        debug_assert!(i <= j);
+        let Some(tab_offset) = self.visible_tab_offset(tab_idx) else {
+            return;
+        };
 
-        (i, j)
+        let tab_width = self.tabs[tab_idx].width();
+        let left_arrow_width = if self.h_scroll > 0 { 2 } else { 0 };
+        let right_arrow_width = if self.draw_right_arrow() { 2 } else { 0 };
+        let visible_width = self.width - left_arrow_width - right_arrow_width;
+        if tab_offset < self.h_scroll {
+            self.h_scroll = tab_offset;
+        } else if tab_offset + tab_width > self.h_scroll + visible_width {
+            self.h_scroll = tab_offset;
+        }
     }
 
     pub fn draw(&mut self) {
@@ -927,11 +928,21 @@ impl TUI {
         let left_arr = self.draw_left_arrow();
         let right_arr = self.draw_right_arrow();
 
-        let (tab_left, tab_right) = self.rendered_tabs();
+        let rendered_tabs = self.rendered_tabs();
 
         let mut pos_x: i32 = 0;
         if left_arr {
-            let style = arrow_style(&self.tabs[0..tab_left], &self.colors);
+            let hidden_left = self.visible_tabs_before_offset(self.h_scroll);
+            let tabs = hidden_left
+                .iter()
+                .map(|idx| &self.tabs[*idx])
+                .collect::<Vec<&Tab>>();
+            let style = tabs
+                .iter()
+                .map(|tab| tab.style)
+                .max()
+                .map(|style| tab_style(style, &self.colors))
+                .unwrap_or(self.colors.tab_normal);
             self.tb
                 .change_cell(pos_x, self.height - 1, LEFT_ARROW, style.fg, style.bg);
             pos_x += 2;
@@ -942,19 +953,47 @@ impl TUI {
         // debug!("left_arr: {}, right_arr: {}", left_arr, right_arr);
 
         // finally draw the tabs
-        for (tab_idx, tab) in self.tabs[tab_left..tab_right].iter().enumerate() {
+        for tab_idx in rendered_tabs.iter().copied() {
+            let tab = &self.tabs[tab_idx];
             tab.draw(
                 &mut self.tb,
                 &self.colors,
                 pos_x,
                 self.height - 1,
-                self.active_idx == tab_idx + tab_left,
+                self.active_idx == tab_idx,
             );
             pos_x += tab.width() + 1; // +1 for margin
         }
 
         if right_arr {
-            let style = arrow_style(&self.tabs[tab_right..], &self.colors);
+            let rendered_last = rendered_tabs.last().copied();
+            let after_rendered = match rendered_last {
+                None => vec![],
+                Some(last) => {
+                    let mut seen_last = false;
+                    self.visible_tab_idxs()
+                        .into_iter()
+                        .filter(|idx| {
+                            if seen_last {
+                                true
+                            } else {
+                                seen_last = *idx == last;
+                                false
+                            }
+                        })
+                        .collect::<Vec<usize>>()
+                }
+            };
+            let tabs = after_rendered
+                .iter()
+                .map(|idx| &self.tabs[*idx])
+                .collect::<Vec<&Tab>>();
+            let style = tabs
+                .iter()
+                .map(|tab| tab.style)
+                .max()
+                .map(|style| tab_style(style, &self.colors))
+                .unwrap_or(self.colors.tab_normal);
             self.tb
                 .change_cell(pos_x, self.height - 1, RIGHT_ARROW, style.fg, style.bg);
         }
@@ -966,15 +1005,8 @@ impl TUI {
     // Moving between tabs, horizontal scroll updates
 
     fn select_tab(&mut self, tab_idx: usize) {
-        if tab_idx < self.active_idx {
-            while tab_idx < self.active_idx {
-                self.prev_tab_();
-            }
-        } else {
-            while tab_idx > self.active_idx {
-                self.next_tab_();
-            }
-        }
+        self.active_idx = tab_idx;
+        self.ensure_tab_visible(tab_idx);
         self.tabs[self.active_idx].set_style(TabStyle::Normal);
     }
 
@@ -991,49 +1023,22 @@ impl TUI {
     /// After closing a tab scroll left if there is space on the right and we can fit more tabs
     /// from the left into the visible part of the tab bar.
     fn fix_scroll_after_close(&mut self) {
-        let (tab_left, tab_right) = self.rendered_tabs();
-
-        if tab_left == 0 {
+        if self.visible_tab_idxs().is_empty() {
             self.h_scroll = 0;
             return;
         }
 
-        // Size of shown part of the tab bar. DOES NOT include LEFT_ARROW.
-        let mut shown_width = 0;
-        for (tab_idx, tab) in self.tabs[tab_left..tab_right].iter().enumerate() {
-            shown_width += tab.width();
-            if tab_idx != tab_right - 1 {
-                shown_width += 1; // space between tabs
-            }
-        }
-
-        // How much space left in tab bar. Not accounting for LEFT_ARROW here!
-        let mut space_left = self.width - shown_width;
-
-        // How much to scroll left
-        let mut scroll_left = 0;
-
-        // Start iterating tabs on the left, add the tab size to `scroll_left` as long as scrolling
-        // doesn't make the right-most tab go out of bounds
-        for left_tab_idx in (0..tab_left).rev() {
-            let tab_width = self.tabs[left_tab_idx].width() + 1; // 1 for space
-            let draw_arrow = left_tab_idx != 0;
-            let tab_with_arrow_w = tab_width + if draw_arrow { 2 } else { 0 };
-
-            if tab_with_arrow_w <= space_left {
-                scroll_left += tab_width;
-                space_left -= tab_width;
-            } else {
-                break;
-            }
-        }
-
-        self.h_scroll -= scroll_left;
+        let max_scroll = (self.visible_tabs_width() - self.width).max(0);
+        self.h_scroll = self.h_scroll.min(max_scroll);
+        self.ensure_tab_visible(self.active_idx);
     }
 
     pub(crate) fn switch(&mut self, string: &str) {
         let mut next_idx = self.active_idx;
         for (tab_idx, tab) in self.tabs.iter().enumerate() {
+            if !tab.is_visible() {
+                continue;
+            }
             match tab.src {
                 MsgSource::Serv { ref serv } => {
                     if serv.contains(string) {
@@ -1062,48 +1067,49 @@ impl TUI {
     }
 
     fn next_tab_(&mut self) {
-        if self.active_idx == self.tabs.len() - 1 {
-            self.active_idx = 0;
-            self.h_scroll = 0;
-        } else {
-            // either the next tab is visible, or we should scroll so that the
-            // next tab becomes visible
-            let next_active = self.active_idx + 1;
-            loop {
-                let (tab_left, tab_right) = self.rendered_tabs();
-                if (next_active >= tab_left && next_active < tab_right)
-                    || (next_active == tab_left && tab_left == tab_right)
-                {
-                    break;
-                }
-                self.h_scroll += self.tabs[tab_left].width() + 1;
-            }
-            self.active_idx = next_active;
+        let visible_idxs = self.visible_tab_idxs();
+        if visible_idxs.is_empty() {
+            return;
         }
+        let next_idx = match visible_idxs.iter().position(|idx| *idx == self.active_idx) {
+            Some(pos) if pos == visible_idxs.len() - 1 => {
+                self.h_scroll = 0;
+                visible_idxs[0]
+            }
+            Some(pos) => visible_idxs[pos + 1],
+            None => visible_idxs
+                .iter()
+                .copied()
+                .find(|idx| *idx > self.active_idx)
+                .unwrap_or_else(|| {
+                    self.h_scroll = 0;
+                    visible_idxs[0]
+                }),
+        };
+        self.active_idx = next_idx;
+        self.ensure_tab_visible(next_idx);
     }
 
     fn prev_tab_(&mut self) {
-        if self.active_idx == 0 {
-            let next_active = self.tabs.len() - 1;
-            while self.active_idx != next_active {
-                self.next_tab_();
-            }
-        } else {
-            let next_active = self.active_idx - 1;
-            loop {
-                let (tab_left, tab_right) = self.rendered_tabs();
-                if (next_active >= tab_left && next_active < tab_right)
-                    || (next_active == tab_left && tab_left == tab_right)
-                {
-                    break;
-                }
-                self.h_scroll -= self.tabs[tab_left - 1].width() + 1;
-            }
-            if self.h_scroll < 0 {
-                self.h_scroll = 0
-            };
-            self.active_idx = next_active;
+        let visible_idxs = self.visible_tab_idxs();
+        if visible_idxs.is_empty() {
+            return;
         }
+        let prev_idx = match visible_idxs.iter().position(|idx| *idx == self.active_idx) {
+            Some(0) => visible_idxs[visible_idxs.len() - 1],
+            Some(pos) => visible_idxs[pos - 1],
+            None => visible_idxs
+                .iter()
+                .rev()
+                .copied()
+                .find(|idx| *idx < self.active_idx)
+                .unwrap_or(visible_idxs[visible_idxs.len() - 1]),
+        };
+        if prev_idx == visible_idxs[0] {
+            self.h_scroll = 0;
+        }
+        self.active_idx = prev_idx;
+        self.ensure_tab_visible(prev_idx);
     }
 
     fn move_tab_left(&mut self) {
@@ -1153,33 +1159,29 @@ impl TUI {
     }
 
     fn go_to_tab(&mut self, c: char) {
+        let visible_idxs = self.visible_tab_idxs();
+        if visible_idxs.is_empty() {
+            return;
+        }
         match c.to_digit(10) {
             Some(i) => {
-                let new_tab_idx: usize = if i as usize > self.tabs.len() || i == 0 {
-                    self.tabs.len() - 1
+                let new_tab_idx: usize = if i as usize > visible_idxs.len() || i == 0 {
+                    visible_idxs[visible_idxs.len() - 1]
                 } else {
-                    i as usize - 1
+                    visible_idxs[i as usize - 1]
                 };
-                match new_tab_idx.cmp(&self.active_idx) {
-                    Ordering::Greater => {
-                        for _ in 0..new_tab_idx - self.active_idx {
-                            self.next_tab_();
-                        }
-                    }
-                    Ordering::Less => {
-                        for _ in 0..self.active_idx - new_tab_idx {
-                            self.prev_tab_();
-                        }
-                    }
-                    Ordering::Equal => {}
-                }
+                self.select_tab(new_tab_idx);
                 self.tabs[self.active_idx].set_style(TabStyle::Normal);
             }
             None => {
                 // multiple tabs can have same switch character so scan
                 // forwards instead of starting from the first tab
-                for i in 1..=self.tabs.len() {
-                    let idx = (self.active_idx + i) % self.tabs.len();
+                let start = visible_idxs
+                    .iter()
+                    .position(|idx| *idx == self.active_idx)
+                    .unwrap_or(0);
+                for i in 1..=visible_idxs.len() {
+                    let idx = visible_idxs[(start + i) % visible_idxs.len()];
                     if self.tabs[idx].switch == Some(c) {
                         self.select_tab(idx);
                         break;
@@ -1449,6 +1451,18 @@ impl TUI {
             }
         }
         false
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tab_lines_text(&self, target: &MsgTarget) -> Option<Vec<String>> {
+        let mut target_idx = None;
+        match *target {
+            MsgTarget::Server { serv } => target_idx = self.find_serv_tab_idx(serv),
+            MsgTarget::Chan { serv, chan } => target_idx = self.find_chan_tab_idx(serv, chan),
+            MsgTarget::User { serv, nick } => target_idx = self.find_user_tab_idx(serv, nick),
+            MsgTarget::AllServTabs { .. } | MsgTarget::CurrentTab => {}
+        }
+        target_idx.map(|idx| self.tabs[idx].widget.lines_text())
     }
 
     pub(crate) fn set_notifier(&mut self, notifier: Notifier, target: &MsgTarget) {

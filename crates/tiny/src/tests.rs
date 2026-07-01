@@ -195,7 +195,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
              |                                        |
              |00:00 tiny_test_user: msg to chan       |
              |osa1:                                   |
-             |mentions x.y.z #chan tiny_test_user     |";
+             |x.y.z #chan tiny_test_user              |";
 
             let mut front_buffer = tui.get_front_buffer();
             normalize_timestamps(&mut front_buffer, DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT);
@@ -218,7 +218,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
              |00:00 tiny_test_user: this is a test in |
              |tiny IRC client -- please ignore        |
              |osa1:                                   |
-             |mentions x.y.z #chan tiny_test_user     |";
+             |x.y.z #chan tiny_test_user              |";
 
             let mut front_buffer = tui.get_front_buffer();
             normalize_timestamps(&mut front_buffer, DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT);
@@ -280,7 +280,7 @@ fn test_bouncer_relay_issue_271() {
              |                                        |
              |00:00 osa1-soju: blah blah              |
              |osa1-soju:                              |
-             |mentions x.y.z osa1/oftc                |";
+             |x.y.z osa1/oftc                         |";
 
             let mut front_buffer = tui.get_front_buffer();
             normalize_timestamps(&mut front_buffer, DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT);
@@ -346,7 +346,7 @@ fn test_privmsg_targetmask_issue_278() {
              |00:00 tiny_test_user: this is a test in |
              |tiny IRC client -- please ignore        |
              |osa1:                                   |
-             |mentions x.y.z tiny_test_user           |";
+             |x.y.z tiny_test_user                    |";
 
             let mut front_buffer = tui.get_front_buffer();
             normalize_timestamps(&mut front_buffer, DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT);

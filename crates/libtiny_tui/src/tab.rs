@@ -13,11 +13,12 @@ pub(crate) struct Tab {
     pub(crate) widget: MessagingUI,
     pub(crate) src: MsgSource,
     pub(crate) style: TabStyle,
+    pub(crate) hidden: bool,
     /// Alt-character to use to switch to this tab.
     pub(crate) switch: Option<char>,
 }
 
-fn tab_style(style: TabStyle, colors: &Colors) -> Style {
+pub(crate) fn tab_style(style: TabStyle, colors: &Colors) -> Style {
     match style {
         TabStyle::Normal => colors.tab_normal,
         TabStyle::JoinOrPart => colors.tab_joinpart,
@@ -33,6 +34,14 @@ impl Tab {
 
     pub(crate) fn set_style(&mut self, style: TabStyle) {
         self.style = style;
+    }
+
+    pub(crate) fn hide(&mut self) {
+        self.hidden = true;
+    }
+
+    pub(crate) fn is_visible(&self) -> bool {
+        !self.hidden
     }
 
     pub(crate) fn update_source<F>(&mut self, f: &F)
