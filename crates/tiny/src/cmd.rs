@@ -98,8 +98,9 @@ fn find_client<'a>(clients: &'a mut [Client], serv_name: &str) -> Option<&'a mut
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static CMDS: [&Cmd; 9] = [
+static CMDS: [&Cmd; 10] = [
     &AWAY_CMD,
+    &BEARINGS_CMD,
     &CLOSE_CMD,
     &CONNECT_CMD,
     &JOIN_CMD,
@@ -109,6 +110,37 @@ static CMDS: [&Cmd; 9] = [
     &NICK_CMD,
     &HELP_CMD,
 ];
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static BEARINGS_CMD: Cmd = Cmd {
+    name: "bearings",
+    cmd_fn: bearings,
+    description: "Requests bearings from SledServ",
+    usage: "`/bearings`",
+};
+
+fn bearings(args: CmdArgs) {
+    let CmdArgs {
+        args,
+        ui,
+        clients,
+        src,
+        ..
+    } = args;
+    if !args.is_empty() {
+        return ui.add_client_err_msg(
+            &format!("Usage: {}", BEARINGS_CMD.usage),
+            &MsgTarget::CurrentTab,
+        );
+    }
+
+    let src = MsgSource::User {
+        serv: src.serv_name().to_owned(),
+        nick: "SledServ".to_owned(),
+    };
+    crate::ui::send_msg(ui, clients, &src, "bearings".to_owned(), false);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -582,6 +614,10 @@ fn test_parse_cmd() {
     let ParsedCmd { cmd, args } = parse_cmd("join #foo").unwrap();
     assert_eq!(cmd.name, "join");
     assert_eq!(args, "#foo");
+
+    let ParsedCmd { cmd, args } = parse_cmd("bearings").unwrap();
+    assert_eq!(cmd.name, "bearings");
+    assert_eq!(args, "");
 }
 
 #[test]
@@ -591,4 +627,103 @@ fn test_msg_args() {
     assert_eq!(split_msg_args("foo, bar"), Some(("foo,", "bar"))); // nick not valid according to RFC but whatever
     assert_eq!(split_msg_args("foo ,bar"), Some(("foo", ",bar")));
     assert_eq!(split_msg_args("#blah blah"), None);
+}
+
+#[test]
+fn test_bearings_matches_msg_wire_action() {
+    use libtiny_common::ChanName;
+    use libtiny_tui::TUI;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+    use tokio::runtime::Builder;
+    use tokio::sync::mpsc;
+    use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let local = tokio::task::LocalSet::new();
+
+    local.block_on(&runtime, async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::task::spawn_local(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read_half, mut write_half) = tokio::io::split(stream);
+            let mut lines = BufReader::new(read_half).lines();
+            let mut privmsgs = Vec::new();
+
+            while let Some(line) = lines.next_line().await.unwrap() {
+                if line.starts_with("USER ") {
+                    write_half
+                        .write_all(b":test 001 tiny-test :Welcome\r\n")
+                        .await
+                        .unwrap();
+                } else if line.starts_with("PRIVMSG ") {
+                    privmsgs.push(line);
+                    if privmsgs.len() == 2 {
+                        break;
+                    }
+                }
+            }
+
+            privmsgs
+        });
+
+        let server_info = ServerInfo {
+            addr: "127.0.0.1".to_owned(),
+            port,
+            tls: false,
+            pass: None,
+            user: None,
+            realname: "Tiny test".to_owned(),
+            nicks: vec!["tiny-test".to_owned()],
+            auto_join: Vec::new(),
+            nickserv_ident: None,
+            sasl_auth: None,
+        };
+        let (client, mut client_events) = Client::new(server_info);
+
+        while !matches!(
+            client_events.recv().await,
+            Some(libtiny_client::Event::Connected)
+        ) {}
+
+        let (snd_input, rcv_input) = mpsc::channel(1);
+        let input = ReceiverStream::new(rcv_input).map(Ok);
+        let (tui, _tui_events) = TUI::run_test(40, 5, input);
+        let ui = UI::new(tui, None);
+        ui.new_server_tab("127.0.0.1", None);
+        let chan = ChanName::new("#current-channel".to_owned());
+        ui.new_chan_tab("127.0.0.1", &chan);
+        let source = MsgSource::Chan {
+            serv: "127.0.0.1".to_owned(),
+            chan,
+        };
+        let defaults = Defaults {
+            nicks: vec!["tiny-test".to_owned()],
+            realname: "Tiny test".to_owned(),
+            join: Vec::new(),
+            tls: false,
+        };
+        let mut clients = vec![client];
+
+        run_cmd("bearings", source.clone(), &defaults, &ui, &mut clients);
+        run_cmd(
+            "msg SledServ bearings",
+            source,
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+
+        assert_eq!(
+            server.await.unwrap(),
+            vec![
+                "PRIVMSG SledServ :bearings".to_owned(),
+                "PRIVMSG SledServ :bearings".to_owned(),
+            ]
+        );
+
+        drop(snd_input);
+    });
 }
