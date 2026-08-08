@@ -98,29 +98,75 @@ fn find_client<'a>(clients: &'a mut [Client], serv_name: &str) -> Option<&'a mut
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static CMDS: [&Cmd; 10] = [
+static CMDS: [&Cmd; 13] = [
     &AWAY_CMD,
-    &BEARINGS_CMD,
     &CLOSE_CMD,
     &CONNECT_CMD,
+    &ETS_CMD,
+    &EXPEDITION_CMD,
     &JOIN_CMD,
     &ME_CMD,
     &MSG_CMD,
     &NAMES_CMD,
     &NICK_CMD,
+    &SPAN_CMD,
+    &TRAIL_CMD,
     &HELP_CMD,
 ];
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static BEARINGS_CMD: Cmd = Cmd {
-    name: "bearings",
-    cmd_fn: bearings,
-    description: "Requests bearings from SledServ",
-    usage: "`/bearings`",
+static ETS_CMD: Cmd = Cmd {
+    name: "ets",
+    cmd_fn: ets,
+    description: "Requests ETS data from SledServ",
+    usage: "`/ets`",
 };
 
-fn bearings(args: CmdArgs) {
+fn ets(args: CmdArgs) {
+    if !args.args.is_empty() {
+        return args
+            .ui
+            .add_client_err_msg(&format!("Usage: {}", ETS_CMD.usage), &MsgTarget::CurrentTab);
+    }
+
+    send_sledserv(args, "ets");
+}
+
+static EXPEDITION_CMD: Cmd = Cmd {
+    name: "expedition",
+    cmd_fn: expedition,
+    description: "Sends an expedition command to SledServ",
+    usage: "`/expedition <arguments>`",
+};
+
+fn expedition(args: CmdArgs) {
+    send_sledserv(args, "expedition");
+}
+
+static SPAN_CMD: Cmd = Cmd {
+    name: "span",
+    cmd_fn: span,
+    description: "Sends a span command to SledServ",
+    usage: "`/span <arguments>`",
+};
+
+fn span(args: CmdArgs) {
+    send_sledserv(args, "span");
+}
+
+static TRAIL_CMD: Cmd = Cmd {
+    name: "trail",
+    cmd_fn: trail,
+    description: "Sends a trail command to SledServ",
+    usage: "`/trail <arguments>`",
+};
+
+fn trail(args: CmdArgs) {
+    send_sledserv(args, "trail");
+}
+
+fn send_sledserv(args: CmdArgs, command: &str) {
     let CmdArgs {
         args,
         ui,
@@ -128,18 +174,17 @@ fn bearings(args: CmdArgs) {
         src,
         ..
     } = args;
-    if !args.is_empty() {
-        return ui.add_client_err_msg(
-            &format!("Usage: {}", BEARINGS_CMD.usage),
-            &MsgTarget::CurrentTab,
-        );
-    }
 
     let src = MsgSource::User {
         serv: src.serv_name().to_owned(),
         nick: "SledServ".to_owned(),
     };
-    crate::ui::send_msg(ui, clients, &src, "bearings".to_owned(), false);
+    let msg = if args.is_empty() {
+        command.to_owned()
+    } else {
+        format!("{command} {args}")
+    };
+    crate::ui::send_msg(ui, clients, &src, msg, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -615,9 +660,24 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "join");
     assert_eq!(args, "#foo");
 
-    let ParsedCmd { cmd, args } = parse_cmd("bearings").unwrap();
-    assert_eq!(cmd.name, "bearings");
+    let ParsedCmd { cmd, args } = parse_cmd("ets").unwrap();
+    assert_eq!(cmd.name, "ets");
     assert_eq!(args, "");
+
+    let ParsedCmd { cmd, args } =
+        parse_cmd("expedition add Find Magnetic North --root /tmp/fmn").unwrap();
+    assert_eq!(cmd.name, "expedition");
+    assert_eq!(args, "add Find Magnetic North --root /tmp/fmn");
+
+    let ParsedCmd { cmd, args } = parse_cmd("trail add buy supplies").unwrap();
+    assert_eq!(cmd.name, "trail");
+    assert_eq!(args, "add buy supplies");
+
+    let ParsedCmd { cmd, args } = parse_cmd("span add write schema").unwrap();
+    assert_eq!(cmd.name, "span");
+    assert_eq!(args, "add write schema");
+
+    assert!(parse_cmd("bearings").is_none());
 }
 
 #[test]
@@ -630,9 +690,10 @@ fn test_msg_args() {
 }
 
 #[test]
-fn test_bearings_matches_msg_wire_action() {
+fn test_sledserv_aliases_match_msg_wire_actions() {
     use libtiny_common::ChanName;
     use libtiny_tui::TUI;
+    use libtiny_tui::test_utils::buffer_str;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
     use tokio::runtime::Builder;
@@ -660,7 +721,7 @@ fn test_bearings_matches_msg_wire_action() {
                         .unwrap();
                 } else if line.starts_with("PRIVMSG ") {
                     privmsgs.push(line);
-                    if privmsgs.len() == 2 {
+                    if privmsgs.len() == 8 {
                         break;
                     }
                 }
@@ -691,7 +752,7 @@ fn test_bearings_matches_msg_wire_action() {
         let (snd_input, rcv_input) = mpsc::channel(1);
         let input = ReceiverStream::new(rcv_input).map(Ok);
         let (tui, _tui_events) = TUI::run_test(40, 5, input);
-        let ui = UI::new(tui, None);
+        let ui = UI::new(tui.clone(), None);
         ui.new_server_tab("127.0.0.1", None);
         let chan = ChanName::new("#current-channel".to_owned());
         ui.new_chan_tab("127.0.0.1", &chan);
@@ -707,9 +768,61 @@ fn test_bearings_matches_msg_wire_action() {
         };
         let mut clients = vec![client];
 
-        run_cmd("bearings", source.clone(), &defaults, &ui, &mut clients);
         run_cmd(
-            "msg SledServ bearings",
+            "ets unexpected",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        ui.draw();
+        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/ets`"));
+
+        run_cmd("ets", source.clone(), &defaults, &ui, &mut clients);
+        run_cmd(
+            "msg SledServ ets",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "expedition add Find Magnetic North --root /tmp/fmn",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "msg SledServ expedition add Find Magnetic North --root /tmp/fmn",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "trail add buy supplies",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "msg SledServ trail add buy supplies",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "span add write schema",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "msg SledServ span add write schema",
             source,
             &defaults,
             &ui,
@@ -719,8 +832,14 @@ fn test_bearings_matches_msg_wire_action() {
         assert_eq!(
             server.await.unwrap(),
             vec![
-                "PRIVMSG SledServ :bearings".to_owned(),
-                "PRIVMSG SledServ :bearings".to_owned(),
+                "PRIVMSG SledServ :ets".to_owned(),
+                "PRIVMSG SledServ :ets".to_owned(),
+                "PRIVMSG SledServ :expedition add Find Magnetic North --root /tmp/fmn".to_owned(),
+                "PRIVMSG SledServ :expedition add Find Magnetic North --root /tmp/fmn".to_owned(),
+                "PRIVMSG SledServ :trail add buy supplies".to_owned(),
+                "PRIVMSG SledServ :trail add buy supplies".to_owned(),
+                "PRIVMSG SledServ :span add write schema".to_owned(),
+                "PRIVMSG SledServ :span add write schema".to_owned(),
             ]
         );
 
