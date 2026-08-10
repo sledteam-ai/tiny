@@ -665,9 +665,9 @@ fn test_parse_cmd() {
     assert_eq!(args, "");
 
     let ParsedCmd { cmd, args } =
-        parse_cmd("expedition add Find Magnetic North --root /tmp/fmn").unwrap();
+        parse_cmd("expedition add Find Magnetic North --project-root /tmp/fmn").unwrap();
     assert_eq!(cmd.name, "expedition");
-    assert_eq!(args, "add Find Magnetic North --root /tmp/fmn");
+    assert_eq!(args, "add Find Magnetic North --project-root /tmp/fmn");
 
     let ParsedCmd { cmd, args } = parse_cmd("trail add buy supplies").unwrap();
     assert_eq!(cmd.name, "trail");
@@ -787,14 +787,14 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             &mut clients,
         );
         run_cmd(
-            "expedition add Find Magnetic North --root /tmp/fmn",
+            "expedition add Find Magnetic North --project-root /tmp/fmn",
             source.clone(),
             &defaults,
             &ui,
             &mut clients,
         );
         run_cmd(
-            "msg SledServ expedition add Find Magnetic North --root /tmp/fmn",
+            "msg SledServ expedition add Find Magnetic North --project-root /tmp/fmn",
             source.clone(),
             &defaults,
             &ui,
@@ -834,8 +834,10 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             vec![
                 "PRIVMSG SledServ :ets".to_owned(),
                 "PRIVMSG SledServ :ets".to_owned(),
-                "PRIVMSG SledServ :expedition add Find Magnetic North --root /tmp/fmn".to_owned(),
-                "PRIVMSG SledServ :expedition add Find Magnetic North --root /tmp/fmn".to_owned(),
+                "PRIVMSG SledServ :expedition add Find Magnetic North --project-root /tmp/fmn"
+                    .to_owned(),
+                "PRIVMSG SledServ :expedition add Find Magnetic North --project-root /tmp/fmn"
+                    .to_owned(),
                 "PRIVMSG SledServ :trail add buy supplies".to_owned(),
                 "PRIVMSG SledServ :trail add buy supplies".to_owned(),
                 "PRIVMSG SledServ :span add write schema".to_owned(),
