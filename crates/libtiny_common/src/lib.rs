@@ -4,6 +4,28 @@ use std::borrow::Borrow;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
+/// User-facing metadata for a slash command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommandInfo {
+    pub name: &'static str,
+    pub usage: &'static str,
+    pub summary: &'static str,
+}
+
+impl CommandInfo {
+    pub const fn new(
+        name: &'static str,
+        usage: &'static str,
+        summary: &'static str,
+    ) -> CommandInfo {
+        CommandInfo {
+            name,
+            usage,
+            summary,
+        }
+    }
+}
+
 /// Channel names according to RFC 2812, section 1.3. Channel names are case insensitive, so this
 /// type defines `Eq`, and `Hash` traits that work in a case-insensitive way. `ChanName::display`
 /// method shows the channel name with the original casing.

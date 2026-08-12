@@ -21,7 +21,7 @@ use crate::notifier::Notifier;
 use crate::tab::{Tab, tab_style};
 use crate::widget::WidgetRet;
 
-use libtiny_common::{ChanNameRef, MsgSource, MsgTarget, TabStyle};
+use libtiny_common::{ChanNameRef, CommandInfo, MsgSource, MsgTarget, TabStyle};
 use term_input::{Event, Key};
 use termbox_simple::{CellBuf, Termbox};
 
@@ -39,36 +39,26 @@ pub(crate) enum TUIRet {
 const LEFT_ARROW: char = '<';
 const RIGHT_ARROW: char = '>';
 
-struct CmdUsage {
-    name: &'static str,
-    description: &'static str,
-    usage: &'static str,
-}
-
-impl CmdUsage {
-    const fn new(name: &'static str, description: &'static str, usage: &'static str) -> CmdUsage {
-        CmdUsage {
-            name,
-            description,
-            usage,
-        }
-    }
-}
-
-const QUIT_CMD: CmdUsage = CmdUsage::new("quit", "Quit tiny", "`/quit` or `/quit <reason>`");
-const CLEAR_CMD: CmdUsage = CmdUsage::new("clear", "Clears current tab", "`/clear`");
-const IGNORE_CMD: CmdUsage = CmdUsage::new("ignore", "Ignore join/quit messages", "`/ignore`");
-const NOTIFY_CMD: CmdUsage = CmdUsage::new(
+const QUIT_CMD: CommandInfo = CommandInfo::new("quit", "`/quit` or `/quit <reason>`", "Quit tiny");
+const CLEAR_CMD: CommandInfo = CommandInfo::new("clear", "`/clear`", "Clears current tab");
+const IGNORE_CMD: CommandInfo =
+    CommandInfo::new("ignore", "`/ignore`", "Ignore join/quit messages");
+const NOTIFY_CMD: CommandInfo = CommandInfo::new(
     "notify",
-    "Set channel notifications",
     "`/notify [off|mentions|messages]`",
+    "Set channel notifications",
 );
-const SWITCH_CMD: CmdUsage = CmdUsage::new("switch", "Switches to tab", "`/switch <tab name>`");
-const RELOAD_CMD: CmdUsage = CmdUsage::new("reload", "Reloads config file", "`/reload`");
+const SWITCH_CMD: CommandInfo =
+    CommandInfo::new("switch", "`/switch <tab name>`", "Switches to tab");
+const RELOAD_CMD: CommandInfo = CommandInfo::new("reload", "`/reload`", "Reloads config file");
 
-const TUI_COMMANDS: [CmdUsage; 6] = [
+const TUI_COMMANDS: [CommandInfo; 6] = [
     QUIT_CMD, CLEAR_CMD, IGNORE_CMD, NOTIFY_CMD, SWITCH_CMD, RELOAD_CMD,
 ];
+
+pub fn command_infos() -> &'static [CommandInfo] {
+    &TUI_COMMANDS
+}
 
 // Public for benchmarks
 pub struct TUI {
@@ -309,7 +299,7 @@ impl TUI {
                     self.add_client_msg(
                         &format!(
                             "/{:<10} - {:<25} - Usage: {}",
-                            cmd.name, cmd.description, cmd.usage
+                            cmd.name, cmd.summary, cmd.usage
                         ),
                         &MsgTarget::CurrentTab,
                     );

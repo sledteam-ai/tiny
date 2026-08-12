@@ -28,6 +28,7 @@ use config::TabConfig;
 use libtiny_common::{ChanNameRef, Event, MsgSource, MsgTarget, TabStyle};
 pub use notifier::Notifier;
 use term_input::Input;
+pub use tui::command_infos;
 
 use std::cell::RefCell;
 use std::path::PathBuf;

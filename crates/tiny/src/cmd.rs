@@ -2,7 +2,7 @@ use crate::config::Defaults;
 use crate::ui::UI;
 use crate::utils;
 use libtiny_client::{Client, ServerInfo};
-use libtiny_common::{ChanNameRef, MsgSource, MsgTarget};
+use libtiny_common::{ChanNameRef, CommandInfo, MsgSource, MsgTarget};
 use libtiny_tui::config::Chan;
 
 use std::borrow::Borrow;
@@ -73,11 +73,17 @@ struct Cmd {
     /// Command function.
     cmd_fn: fn(CmdArgs),
 
-    /// Command description. Shown in `/help` and error messages.
-    description: &'static str,
+    /// Short user-facing command summary.
+    summary: &'static str,
 
     /// Command usage. Shown in `/help` and error messages.
     usage: &'static str,
+}
+
+impl Cmd {
+    const fn info(&self) -> CommandInfo {
+        CommandInfo::new(self.name, self.usage, self.summary)
+    }
 }
 
 fn find_client_idx(clients: &[Client], serv_name: &str) -> Option<usize> {
@@ -98,9 +104,10 @@ fn find_client<'a>(clients: &'a mut [Client], serv_name: &str) -> Option<&'a mut
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static CMDS: [&Cmd; 13] = [
+static CMDS: [&Cmd; 14] = [
     &AWAY_CMD,
     &CLOSE_CMD,
+    &CMDS_CMD,
     &CONNECT_CMD,
     &ETS_CMD,
     &EXPEDITION_CMD,
@@ -114,12 +121,46 @@ static CMDS: [&Cmd; 13] = [
     &HELP_CMD,
 ];
 
+pub(crate) fn command_infos() -> impl Iterator<Item = CommandInfo> {
+    libtiny_tui::command_infos()
+        .iter()
+        .copied()
+        .chain(CMDS.iter().map(|cmd| cmd.info()))
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+static CMDS_CMD: Cmd = Cmd {
+    name: "cmds",
+    cmd_fn: cmds,
+    summary: "Lists available commands",
+    usage: "`/cmds`",
+};
+
+fn cmds(args: CmdArgs) {
+    if !args.args.is_empty() {
+        return args.ui.add_client_err_msg(
+            &format!("Usage: {}", CMDS_CMD.usage),
+            &MsgTarget::CurrentTab,
+        );
+    }
+
+    args.ui
+        .add_client_msg("Available Commands:", &MsgTarget::CurrentTab);
+    for info in command_infos() {
+        args.ui.add_client_msg(
+            &format!("{:<45} - {}", info.usage, info.summary),
+            &MsgTarget::CurrentTab,
+        );
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static ETS_CMD: Cmd = Cmd {
     name: "ets",
     cmd_fn: ets,
-    description: "Requests ETS data from SledServ",
+    summary: "Requests ETS data from SledServ",
     usage: "`/ets`",
 };
 
@@ -136,7 +177,7 @@ fn ets(args: CmdArgs) {
 static EXPEDITION_CMD: Cmd = Cmd {
     name: "expedition",
     cmd_fn: expedition,
-    description: "Sends an expedition command to SledServ",
+    summary: "Sends an expedition command to SledServ",
     usage: "`/expedition <arguments>`",
 };
 
@@ -147,7 +188,7 @@ fn expedition(args: CmdArgs) {
 static SPAN_CMD: Cmd = Cmd {
     name: "span",
     cmd_fn: span,
-    description: "Sends a span command to SledServ",
+    summary: "Sends a span command to SledServ",
     usage: "`/span <arguments>`",
 };
 
@@ -158,7 +199,7 @@ fn span(args: CmdArgs) {
 static TRAIL_CMD: Cmd = Cmd {
     name: "trail",
     cmd_fn: trail,
-    description: "Sends a trail command to SledServ",
+    summary: "Sends a trail command to SledServ",
     usage: "`/trail <arguments>`",
 };
 
@@ -192,7 +233,7 @@ fn send_sledserv(args: CmdArgs, command: &str) {
 static AWAY_CMD: Cmd = Cmd {
     name: "away",
     cmd_fn: away,
-    description: "Sets/removes away message",
+    summary: "Sets/removes away message",
     usage: "`/away` or `/away <message>`",
 };
 
@@ -212,7 +253,7 @@ fn away(args: CmdArgs) {
 static CLOSE_CMD: Cmd = Cmd {
     name: "close",
     cmd_fn: close,
-    description: "Closes current tab",
+    summary: "Closes current tab",
     usage: "`/close` or `/close <reason>`",
 };
 
@@ -259,7 +300,7 @@ fn close(args: CmdArgs) {
 static CONNECT_CMD: Cmd = Cmd {
     name: "connect",
     cmd_fn: connect,
-    description: "Connects to a server",
+    summary: "Connects to a server",
     usage: "`/connect <host>:<port>` or `/connect` to reconnect",
 };
 
@@ -372,7 +413,7 @@ fn connect_(
 static JOIN_CMD: Cmd = Cmd {
     name: "join",
     cmd_fn: join,
-    description: "Joins a channel",
+    summary: "Joins a channel",
     usage: "`/join <chan1> [-ignore] [-notify [off|mentions|messages]],<chan2>...` or `/join` in a channel tab to rejoin",
 };
 
@@ -455,7 +496,7 @@ fn join(args: CmdArgs) {
 static ME_CMD: Cmd = Cmd {
     name: "me",
     cmd_fn: me,
-    description: "Sends emote message",
+    summary: "Sends emote message",
     usage: "`/me <message>`",
 };
 
@@ -478,7 +519,7 @@ fn me(args: CmdArgs) {
 static MSG_CMD: Cmd = Cmd {
     name: "msg",
     cmd_fn: msg,
-    description: "Sends a message to a user",
+    summary: "Sends a message to a user",
     usage: "`/msg <nick> <message>`",
 };
 
@@ -554,7 +595,7 @@ fn msg(args: CmdArgs) {
 static NAMES_CMD: Cmd = Cmd {
     name: "names",
     cmd_fn: names,
-    description: "Shows users in channel",
+    summary: "Shows users in channel",
     usage: "`/names`",
 };
 
@@ -601,7 +642,7 @@ fn names(args: CmdArgs) {
 static NICK_CMD: Cmd = Cmd {
     name: "nick",
     cmd_fn: nick,
-    description: "Sets your nick",
+    summary: "Sets your nick",
     usage: "`/nick <nick>`",
 };
 
@@ -630,7 +671,7 @@ fn nick(args: CmdArgs) {
 static HELP_CMD: Cmd = Cmd {
     name: "help",
     cmd_fn: help,
-    description: "Displays this message",
+    summary: "Displays this message",
     usage: "`/help`",
 };
 
@@ -641,7 +682,7 @@ fn help(args: CmdArgs) {
         ui.add_client_msg(
             &format!(
                 "/{:<10} - {:<25} - Usage: {}",
-                cmd.name, cmd.description, cmd.usage
+                cmd.name, cmd.summary, cmd.usage
             ),
             &MsgTarget::CurrentTab,
         )
@@ -664,6 +705,10 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "ets");
     assert_eq!(args, "");
 
+    let ParsedCmd { cmd, args } = parse_cmd("cmds").unwrap();
+    assert_eq!(cmd.name, "cmds");
+    assert_eq!(args, "");
+
     let ParsedCmd { cmd, args } =
         parse_cmd("expedition add Find Magnetic North --project-root /tmp/fmn").unwrap();
     assert_eq!(cmd.name, "expedition");
@@ -678,6 +723,89 @@ fn test_parse_cmd() {
     assert_eq!(args, "add write schema");
 
     assert!(parse_cmd("bearings").is_none());
+}
+
+#[test]
+fn test_command_metadata() {
+    use std::collections::HashSet;
+
+    let infos = command_infos().collect::<Vec<_>>();
+    let mut names = HashSet::new();
+    for info in &infos {
+        assert!(names.insert(info.name), "duplicate command: {}", info.name);
+        assert!(
+            !info.summary.trim().is_empty(),
+            "{} has no summary",
+            info.name
+        );
+        assert!(
+            info.usage.starts_with("`/"),
+            "{} has invalid usage: {}",
+            info.name,
+            info.usage
+        );
+    }
+
+    for name in ["cmds", "ets", "expedition", "trail", "span"] {
+        assert!(names.contains(name), "missing command metadata: {name}");
+    }
+
+    for cmd in CMDS {
+        let parsed = parse_cmd(cmd.name).unwrap();
+        assert_eq!(parsed.cmd.info(), cmd.info());
+    }
+}
+
+#[test]
+fn test_cmds_is_local_and_uses_command_metadata() {
+    use libtiny_tui::TUI;
+    use libtiny_tui::test_utils::buffer_str;
+    use tokio::runtime::Builder;
+    use tokio::sync::mpsc;
+    use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let local = tokio::task::LocalSet::new();
+
+    local.block_on(&runtime, async {
+        let (snd_input, rcv_input) = mpsc::channel(1);
+        let input = ReceiverStream::new(rcv_input).map(Ok);
+        let (tui, _tui_events) = TUI::run_test(160, 30, input);
+        let ui = UI::new(tui.clone(), None);
+        ui.new_server_tab("test-server", None);
+        let defaults = Defaults {
+            nicks: vec!["tiny-test".to_owned()],
+            realname: "Tiny test".to_owned(),
+            join: Vec::new(),
+            tls: false,
+        };
+
+        // An empty client list also verifies that this local command does not use the IRC send
+        // path, which requires a client for the current server.
+        run_cmd(
+            "cmds",
+            MsgSource::Serv {
+                serv: "test-server".to_owned(),
+            },
+            &defaults,
+            &ui,
+            &mut Vec::new(),
+        );
+        ui.draw();
+
+        let output = buffer_str(&tui.get_front_buffer(), 160, 30);
+        assert!(output.contains("Available Commands:"));
+        for info in command_infos() {
+            assert!(
+                output.contains(&format!("{:<45} - {}", info.usage, info.summary)),
+                "missing command output for {}",
+                info.name
+            );
+        }
+
+        drop(snd_input);
+    });
 }
 
 #[test]
