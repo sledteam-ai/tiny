@@ -783,16 +783,16 @@ mod client_send_tests {
         assert!(matches!(
             first,
             Cmd::Msg(ref wire) if wire == concat!(
-                "BATCH +tiny-1 draft/multiline #tiny\r\n",
-                "@batch=tiny-1 PRIVMSG #tiny :first\r\n",
-                "@batch=tiny-1 PRIVMSG #tiny :second\r\n",
-                "BATCH -tiny-1\r\n",
+                "BATCH +tiny1 draft/multiline #tiny\r\n",
+                "@batch=tiny1 PRIVMSG #tiny :first\r\n",
+                "@batch=tiny1 PRIVMSG #tiny :second\r\n",
+                "BATCH -tiny1\r\n",
             )
         ));
         assert!(matches!(
             second,
-            Cmd::Msg(ref wire) if wire.starts_with("BATCH +tiny-2 draft/multiline #tiny\r\n")
-                && wire.ends_with("BATCH -tiny-2\r\n")
+            Cmd::Msg(ref wire) if wire.starts_with("BATCH +tiny2 draft/multiline #tiny\r\n")
+                && wire.ends_with("BATCH -tiny2\r\n")
         ));
     }
 

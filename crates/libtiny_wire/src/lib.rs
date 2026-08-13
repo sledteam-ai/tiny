@@ -105,9 +105,8 @@ pub fn multiline_privmsg(
     if lines.len() < 2
         || lines.iter().all(String::is_empty)
         || lines.iter().any(|line| line.contains(['\r', '\n']))
-        || !reference
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        || reference.is_empty()
+        || !reference.bytes().all(|byte| byte.is_ascii_alphanumeric())
     {
         return None;
     }
@@ -980,7 +979,7 @@ mod tests {
         assert_eq!(cap_ls(), "CAP LS 302\r\n");
         assert_eq!(privmsg("#tiny", "hello"), "PRIVMSG #tiny :hello\r\n");
         assert_eq!(
-            multiline_privmsg("#tiny", &["hello".to_owned()], "tiny-1", 16384, 64),
+            multiline_privmsg("#tiny", &["hello".to_owned()], "tiny1", 16384, 64),
             None
         );
     }
@@ -991,16 +990,16 @@ mod tests {
             multiline_privmsg(
                 "#tiny",
                 &["first line".to_owned(), "second line".to_owned()],
-                "tiny-1",
+                "tiny1",
                 16384,
                 64,
             ),
             Some(
                 concat!(
-                    "BATCH +tiny-1 draft/multiline #tiny\r\n",
-                    "@batch=tiny-1 PRIVMSG #tiny :first line\r\n",
-                    "@batch=tiny-1 PRIVMSG #tiny :second line\r\n",
-                    "BATCH -tiny-1\r\n",
+                    "BATCH +tiny1 draft/multiline #tiny\r\n",
+                    "@batch=tiny1 PRIVMSG #tiny :first line\r\n",
+                    "@batch=tiny1 PRIVMSG #tiny :second line\r\n",
+                    "BATCH -tiny1\r\n",
                 )
                 .to_owned()
             )
@@ -1013,17 +1012,17 @@ mod tests {
             multiline_privmsg(
                 "bob",
                 &["before".to_owned(), "".to_owned(), "after".to_owned()],
-                "tiny-2",
+                "tiny2",
                 16384,
                 64,
             ),
             Some(
                 concat!(
-                    "BATCH +tiny-2 draft/multiline bob\r\n",
-                    "@batch=tiny-2 PRIVMSG bob :before\r\n",
-                    "@batch=tiny-2 PRIVMSG bob :\r\n",
-                    "@batch=tiny-2 PRIVMSG bob :after\r\n",
-                    "BATCH -tiny-2\r\n",
+                    "BATCH +tiny2 draft/multiline bob\r\n",
+                    "@batch=tiny2 PRIVMSG bob :before\r\n",
+                    "@batch=tiny2 PRIVMSG bob :\r\n",
+                    "@batch=tiny2 PRIVMSG bob :after\r\n",
+                    "BATCH -tiny2\r\n",
                 )
                 .to_owned()
             )
@@ -1036,13 +1035,13 @@ mod tests {
         let wire = multiline_privmsg(
             "#tiny",
             &[long_line.clone(), "tail".to_owned()],
-            "tiny-3",
+            "tiny3",
             16384,
             64,
         )
         .unwrap();
 
-        assert!(wire.contains("@batch=tiny-3;draft/multiline-concat PRIVMSG #tiny :"));
+        assert!(wire.contains("@batch=tiny3;draft/multiline-concat PRIVMSG #tiny :"));
         assert!(wire.split_inclusive("\r\n").all(|line| line.len() <= 512));
 
         let fragments = wire
@@ -1059,14 +1058,16 @@ mod tests {
     #[test]
     fn multiline_enforces_reconstructed_byte_and_fragment_limits() {
         let lines = vec!["1234".to_owned(), "5678".to_owned()];
-        assert!(multiline_privmsg("#tiny", &lines, "tiny-4", 9, 2).is_some());
-        assert!(multiline_privmsg("#tiny", &lines, "tiny-4", 8, 2).is_none());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny4", 9, 2).is_some());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny4", 8, 2).is_none());
 
         let long_line = "x".repeat(900);
         let lines = vec![long_line, "tail".to_owned()];
-        assert!(multiline_privmsg("#tiny", &lines, "tiny-5", 16384, 3).is_some());
-        assert!(multiline_privmsg("#tiny", &lines, "tiny-5", 16384, 2).is_none());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny5", 16384, 3).is_some());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny5", 16384, 2).is_none());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny-5", 16384, 64).is_none());
         assert!(multiline_privmsg("#tiny", &lines, "bad_ref", 16384, 64).is_none());
+        assert!(multiline_privmsg("#tiny", &lines, "", 16384, 64).is_none());
     }
 
     #[test]

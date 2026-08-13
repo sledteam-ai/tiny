@@ -302,7 +302,7 @@ impl StateInner {
     }
 
     fn next_batch_reference(&mut self) -> String {
-        let reference = format!("tiny-{}", self.next_batch_reference);
+        let reference = format!("tiny{}", self.next_batch_reference);
         self.next_batch_reference = self.next_batch_reference.wrapping_add(1).max(1);
         reference
     }
@@ -1002,8 +1002,15 @@ mod tests {
     #[test]
     fn batch_references_are_valid_and_unique() {
         let state = State::new(server_info());
-        assert_eq!(state.next_batch_reference(), "tiny-1");
-        assert_eq!(state.next_batch_reference(), "tiny-2");
+        let first = state.next_batch_reference();
+        state.reset();
+        let second = state.next_batch_reference();
+
+        assert_eq!(first, "tiny1");
+        assert_eq!(second, "tiny2");
+        assert_ne!(first, second);
+        assert!(first.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+        assert!(second.bytes().all(|byte| byte.is_ascii_alphanumeric()));
     }
 
     #[test]
