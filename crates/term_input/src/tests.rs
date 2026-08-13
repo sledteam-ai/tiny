@@ -57,4 +57,8 @@ fn test_ctrl_enter_encodings() {
         parse_single_event("\x1B[27;5;13~".as_bytes()),
         Event::Key(Key::CtrlEnter)
     );
+    assert_eq!(
+        parse_single_event("\x1B[13;5:1u".as_bytes()),
+        Event::Key(Key::CtrlEnter)
+    );
 }

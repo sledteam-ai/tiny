@@ -98,10 +98,11 @@ impl MessagingUI {
         scrollback: usize,
         msg_layout: Layout,
     ) -> MessagingUI {
+        let composer_height = Composer::height(height);
         MessagingUI {
-            msg_area: MsgArea::new(width, height - 1, scrollback, msg_layout),
+            msg_area: MsgArea::new(width, height - composer_height, scrollback, msg_layout),
             input_field: InputArea::new(width, get_input_field_max_height(height)),
-            composer: None,
+            composer: Some(Composer::new(String::new(), 0, "")),
             exit_dialogue: None,
             width,
             height,
@@ -207,16 +208,13 @@ impl MessagingUI {
                             let (input, cursor) = composer.cancel();
                             self.input_field.set(&input);
                             self.input_field.set_cursor(cursor);
-                            WidgetRet::KeyHandled
-                        }
-                        WidgetRet::Lines(_) => {
-                            self.composer = None;
                             self.msg_area.resize(
                                 self.width,
                                 self.height - self.input_field.get_height(self.width),
                             );
-                            ret
+                            WidgetRet::KeyHandled
                         }
+                        WidgetRet::Lines(_) => ret,
                         _ => ret,
                     }
                 }

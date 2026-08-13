@@ -144,8 +144,10 @@ byte_seq_parser! {
     [27, 91, 50, 49, 59, 53, 126] => Key::CtrlF(FKey::F10),
     [27, 91, 50, 51, 59, 53, 126] => Key::CtrlF(FKey::F11),
     [27, 91, 50, 52, 59, 53, 126] => Key::CtrlF(FKey::F12),
-    // Kitty's keyboard protocol and xterm's modifyOtherKeys encoding.
+    // Kitty's keyboard protocol and xterm's modifyOtherKeys encoding. Terminals using only the
+    // legacy protocol cannot distinguish Ctrl+Enter from Enter.
     [27, 91, 49, 51, 59, 53, 117] => Key::CtrlEnter,
+    [27, 91, 49, 51, 59, 53, 58, 49, 117] => Key::CtrlEnter,
     [27, 91, 50, 55, 59, 53, 59, 49, 51, 126] => Key::CtrlEnter,
     [27, 91, 51, 126] => Key::Del,
     [27, 91, 54, 126] => Key::PageDown,

@@ -89,6 +89,9 @@ pub struct TUI {
 
     /// TabConfig settings loaded from config file
     tab_configs: TabConfigs,
+
+    #[cfg(test)]
+    compose_new_tabs: bool,
 }
 
 pub(crate) enum CmdResult {
@@ -113,6 +116,14 @@ impl TUI {
     pub fn new_test(w: u16, h: u16) -> TUI {
         let tb = Termbox::init_test(w, h);
         TUI::new_tb(None, tb)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn use_single_line_input(&mut self) {
+        self.compose_new_tabs = false;
+        self.tabs[self.active_idx]
+            .widget
+            .keypressed(&KeyAction::Cancel);
     }
 
     /// Get termbox front buffer. Useful for testing rendering.
@@ -154,6 +165,8 @@ impl TUI {
             key_map: KeyMap::default(),
             config_path,
             tab_configs: TabConfigs::default(),
+            #[cfg(test)]
+            compose_new_tabs: true,
         };
 
         // Init "mentions" tab. This needs to happen right after creating the TUI to be able to
@@ -433,6 +446,10 @@ impl TUI {
                 switch,
             },
         );
+        #[cfg(test)]
+        if !self.compose_new_tabs {
+            self.tabs[idx].widget.keypressed(&KeyAction::Cancel);
+        }
     }
 
     fn hide_server_tab(&mut self, serv: &str) {

@@ -176,7 +176,8 @@ Default key bindings:
 
 - `alt-left/right` move tab to left/right
 
-- `C-x` open the multiline composer (`Enter` adds a line, `C-Enter` sends)
+- `C-Enter` send the multiline composer (`Enter` adds a line, `Esc` closes it)
+- `C-x` reopen the multiline composer
 
 [key-bindings-wiki]: https://github.com/osa1/tiny/wiki/Configuring-key-bindings
 

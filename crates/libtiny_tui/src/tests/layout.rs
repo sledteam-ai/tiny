@@ -6,9 +6,11 @@ use crate::msg_area::Layout;
 use crate::test_utils::expect_screen;
 use crate::tui::TUI;
 
+use super::single_line_tui;
+
 #[test]
 fn test_join_part_overflow() {
-    let mut tui = TUI::new_test(21, 4);
+    let mut tui = single_line_tui(21, 4);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -36,7 +38,7 @@ fn test_join_part_overflow() {
 
 #[test]
 fn test_alignment_long_string() {
-    let mut tui = TUI::new_test(40, 5);
+    let mut tui = single_line_tui(40, 5);
     tui.set_layout(Layout::Aligned { max_nick_len: 12 });
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
@@ -71,7 +73,7 @@ fn test_alignment_long_string() {
 
 #[test]
 fn test_mnemonic_generation() {
-    let mut tui = TUI::new_test(10, 10);
+    let mut tui = single_line_tui(10, 10);
     tui.new_chan_tab("s1", ChanNameRef::new("#ab"));
     tui.new_chan_tab("s2", ChanNameRef::new("#ab"));
     tui.new_chan_tab("s3", ChanNameRef::new("#ab"));
@@ -85,7 +87,7 @@ fn test_mnemonic_generation() {
 }
 
 fn setup_tui(layout: Layout) -> (TUI, MsgTarget<'static>) {
-    let mut tui = TUI::new_test(40, 5);
+    let mut tui = single_line_tui(40, 5);
     tui.set_layout(layout);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");

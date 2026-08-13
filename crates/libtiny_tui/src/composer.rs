@@ -56,6 +56,12 @@ impl Composer {
                     WidgetRet::KeyHandled
                 } else {
                     let text: String = self.buffer.iter().collect();
+                    self.buffer.clear();
+                    self.cursor = 0;
+                    self.preferred_column = None;
+                    self.scroll = 0;
+                    self.original_input.clear();
+                    self.original_cursor = 0;
                     WidgetRet::Lines(text.split('\n').map(str::to_owned).collect())
                 }
             }
@@ -76,6 +82,11 @@ impl Composer {
                     self.buffer.remove(self.cursor);
                     self.preferred_column = None;
                 }
+                WidgetRet::KeyHandled
+            }
+            KeyAction::InputDeleteToEnd => {
+                self.buffer.drain(self.cursor..);
+                self.preferred_column = None;
                 WidgetRet::KeyHandled
             }
             KeyAction::InputMoveCursLeft => {
@@ -302,6 +313,28 @@ mod tests {
             composer.keypressed(&KeyAction::ComposerSend),
             WidgetRet::Lines(lines) if lines == ["one", "two"]
         ));
+        assert!(composer.buffer.is_empty());
+        assert_eq!(composer.cursor, 0);
+    }
+
+    #[test]
+    fn ctrl_k_deletes_from_cursor_to_end_of_buffer() {
+        let mut composer = Composer::new(String::new(), 0, "one\ntwo");
+        composer.cursor = 2;
+
+        composer.keypressed(&KeyAction::InputDeleteToEnd);
+
+        assert_eq!(composer.buffer.iter().collect::<String>(), "on");
+        assert_eq!(composer.cursor, 2);
+    }
+
+    #[test]
+    fn ctrl_a_moves_to_start_of_current_line() {
+        let mut composer = Composer::new(String::new(), 0, "one\ntwo");
+
+        composer.keypressed(&KeyAction::InputMoveCursStart);
+
+        assert_eq!(composer.cursor, 4);
     }
 
     #[test]

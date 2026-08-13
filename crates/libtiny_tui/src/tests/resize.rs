@@ -5,12 +5,12 @@ use std::panic::Location;
 use libtiny_common::{ChanNameRef, MsgTarget};
 use term_input::{Arrow, Key};
 
+use super::single_line_tui;
 use crate::test_utils::expect_screen;
-use crate::tui::TUI;
 
 #[test]
 fn test_resize_recalc_scroll() {
-    let mut tui = TUI::new_test(15, 5);
+    let mut tui = single_line_tui(15, 5);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -83,7 +83,7 @@ fn test_resize_recalc_scroll() {
 
 #[test]
 fn test_resize_scroll_stick_to_top() {
-    let mut tui = TUI::new_test(18, 10);
+    let mut tui = single_line_tui(18, 10);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -142,7 +142,7 @@ fn test_resize_scroll_stick_to_top() {
 
 #[test]
 fn test_resize_no_scroll_stay_on_bottom() {
-    let mut tui = TUI::new_test(18, 10);
+    let mut tui = single_line_tui(18, 10);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -222,7 +222,7 @@ fn test_resize_no_scroll_stay_on_bottom() {
 // Testing for crashes by resizing from 50x50 -> 0x0 -> 50x50
 #[test]
 fn test_resize() {
-    let mut tui = TUI::new_test(80, 50);
+    let mut tui = single_line_tui(80, 50);
 
     let server = "<server>";
     tui.new_server_tab(server, None);
@@ -246,7 +246,7 @@ fn test_resize() {
 // https://github.com/osa1/tiny/pull/351#issuecomment-915447462
 #[test]
 fn test_resize_scroll_resize() {
-    let mut tui = TUI::new_test(16, 10);
+    let mut tui = single_line_tui(16, 10);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -313,7 +313,7 @@ fn test_resize_scroll_resize() {
 // https://github.com/osa1/tiny/issues/355
 #[test]
 fn test_clear_resize_recalc_scroll() {
-    let mut tui = TUI::new_test(15, 5);
+    let mut tui = single_line_tui(15, 5);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);

@@ -192,6 +192,7 @@ colors:
     ### Defaults ###
     # ctrl_c: exit
     # ctrl_x: open_composer
+    # ctrl_enter: composer_send
 
     # alt_1:
     #     tab_goto: 1

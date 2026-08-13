@@ -18,9 +18,15 @@ fn enter_string(tui: &mut TUI, s: &str) {
     }
 }
 
+fn single_line_tui(w: u16, h: u16) -> TUI {
+    let mut tui = TUI::new_test(w, h);
+    tui.use_single_line_input();
+    tui
+}
+
 #[test]
 fn init_screen() {
-    let mut tui = TUI::new_test(20, 4);
+    let mut tui = single_line_tui(20, 4);
     tui.draw();
 
     #[rustfmt::skip]
@@ -34,7 +40,7 @@ fn init_screen() {
 
 #[test]
 fn mentions_tab_is_hidden_from_tab_bar() {
-    let mut tui = TUI::new_test(20, 4);
+    let mut tui = single_line_tui(20, 4);
     let tabs = tui.get_tabs();
     assert_eq!(tabs.len(), 1);
     assert!(tabs[0].hidden);
@@ -56,7 +62,7 @@ fn mentions_tab_is_hidden_from_tab_bar() {
 
 #[test]
 fn tab_navigation_skips_hidden_mentions_tab() {
-    let mut tui = TUI::new_test(30, 4);
+    let mut tui = single_line_tui(30, 4);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -103,7 +109,7 @@ fn composer_enter_and_ctrl_enter_submit_one_logical_message() {
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
 
-    assert!(tui.handle_input_event(Event::Key(Key::Ctrl('x'))).is_none());
+    assert!(tui.get_tabs()[1].widget.is_composing());
     enter_string(&mut tui, "first");
     assert!(
         tui.handle_input_event(Event::Key(Key::Char('\r')))
@@ -116,12 +122,19 @@ fn composer_enter_and_ctrl_enter_submit_one_logical_message() {
         Some(crate::tui::TUIRet::Lines { lines, .. })
             if lines == ["first", "second"]
     ));
-    assert!(!tui.get_tabs()[1].widget.is_composing());
+    assert!(tui.get_tabs()[1].widget.is_composing());
+
+    enter_string(&mut tui, "next");
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::CtrlEnter)),
+        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["next"]
+    ));
+    assert!(tui.get_tabs()[1].widget.is_composing());
 }
 
 #[test]
 fn multiline_paste_opens_bold_internal_composer() {
-    let mut tui = TUI::new_test(20, 10);
+    let mut tui = single_line_tui(20, 10);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
 
@@ -145,7 +158,7 @@ fn multiline_paste_opens_bold_internal_composer() {
 
 #[test]
 fn composer_scrollback_and_tab_movement_keep_composer_focus() {
-    let mut tui = TUI::new_test(24, 10);
+    let mut tui = single_line_tui(24, 10);
     let serv = "irc.example.org";
     let first = ChanNameRef::new("#first");
     let second = ChanNameRef::new("#second");
@@ -182,9 +195,10 @@ fn composer_scrollback_and_tab_movement_keep_composer_focus() {
 
 #[test]
 fn single_line_send_is_unchanged() {
-    let mut tui = TUI::new_test(20, 5);
+    let mut tui = single_line_tui(20, 5);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
+    tui.handle_input_event(Event::Key(Key::Esc));
     enter_string(&mut tui, "quick riff");
 
     assert!(matches!(
@@ -196,9 +210,10 @@ fn single_line_send_is_unchanged() {
 
 #[test]
 fn escape_cancels_composer_and_restores_single_line_draft() {
-    let mut tui = TUI::new_test(20, 5);
+    let mut tui = single_line_tui(20, 5);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
+    tui.handle_input_event(Event::Key(Key::Esc));
     enter_string(&mut tui, "keep me");
     tui.handle_input_event(Event::Key(Key::Ctrl('x')));
     enter_string(&mut tui, " discarded");
@@ -213,8 +228,22 @@ fn escape_cancels_composer_and_restores_single_line_draft() {
 }
 
 #[test]
+fn escape_closes_default_composer_and_ctrl_x_reopens_it() {
+    let mut tui = TUI::new_test(20, 5);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    assert!(tui.get_tabs()[1].widget.is_composing());
+
+    tui.handle_input_event(Event::Key(Key::Esc));
+    assert!(!tui.get_tabs()[1].widget.is_composing());
+
+    tui.handle_input_event(Event::Key(Key::Ctrl('x')));
+    assert!(tui.get_tabs()[1].widget.is_composing());
+}
+
+#[test]
 fn hidden_mentions_tab_still_receives_messages() {
-    let mut tui = TUI::new_test(20, 4);
+    let mut tui = single_line_tui(20, 4);
     let target = MsgTarget::Server { serv: "mentions" };
 
     tui.add_msg("osa1 in x.y.z:#camp: hello", time::empty_tm(), &target);
@@ -230,7 +259,7 @@ fn hidden_mentions_tab_still_receives_messages() {
 
 #[test]
 fn alt_arrows_scroll_each_tab_independently_and_show_indicator() {
-    let mut tui = TUI::new_test(24, 6);
+    let mut tui = single_line_tui(24, 6);
     let first = "first.example.org";
     let second = "second.example.org";
     tui.new_server_tab(first, None);
@@ -276,7 +305,7 @@ fn alt_arrows_scroll_each_tab_independently_and_show_indicator() {
 #[test]
 fn close_rightmost_tab() {
     // After closing right-most tab the tab bar should scroll left.
-    let mut tui = TUI::new_test(20, 4);
+    let mut tui = single_line_tui(20, 4);
     tui.new_server_tab("irc.server_1.org", None);
     tui.new_server_tab("irc.server_2.org", None);
     tui.next_tab();
@@ -319,7 +348,7 @@ fn close_rightmost_tab() {
 
 #[test]
 fn small_screen_1() {
-    let mut tui = TUI::new_test(21, 3);
+    let mut tui = single_line_tui(21, 3);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -368,7 +397,7 @@ fn small_screen_1() {
 
 #[test]
 fn small_screen_2() {
-    let mut tui = TUI::new_test(21, 4);
+    let mut tui = single_line_tui(21, 4);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -405,7 +434,7 @@ fn small_screen_2() {
 
 #[test]
 fn ctrl_w() {
-    let mut tui = TUI::new_test(30, 3);
+    let mut tui = single_line_tui(30, 3);
     let serv = "irc.server_1.org";
     let chan = ChanNameRef::new("#chan");
     tui.new_server_tab(serv, None);
@@ -474,7 +503,7 @@ fn ctrl_w() {
 #[test]
 fn test_text_field_wrap() {
     // Screen should be wide enough to enable wrapping. See SCROLL_FALLBACK_WIDTH in text_field.rs
-    let mut tui = TUI::new_test(40, 8);
+    let mut tui = single_line_tui(40, 8);
 
     let server = "chat.freenode.net";
     tui.new_server_tab(server, None);
