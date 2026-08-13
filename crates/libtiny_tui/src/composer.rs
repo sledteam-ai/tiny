@@ -30,8 +30,8 @@ impl Composer {
     pub(crate) fn height(parent_height: i32) -> i32 {
         MAX_HEIGHT
             .min((parent_height / 2).max(3))
-            // Keep one row each for chat and the command line on very small screens.
-            .min((parent_height - 2).max(0))
+            // Keep one row each for chat, the command line, and its focus indicator.
+            .min((parent_height - 3).max(0))
     }
 
     pub(crate) fn keypressed(&mut self, action: &KeyAction) -> WidgetRet {

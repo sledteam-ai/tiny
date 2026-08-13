@@ -2,7 +2,7 @@ use std::panic::Location;
 
 use libtiny_common::{ChanNameRef, MsgSource, MsgTarget};
 use term_input::{Event, Key};
-use termbox_simple::{TB_BOLD, TB_UNDERLINE};
+use termbox_simple::TB_BOLD;
 
 use crate::test_utils::expect_screen;
 use crate::tui::TUI;
@@ -112,10 +112,11 @@ fn dual_inputs_are_visible_and_tab_toggles_focus() {
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
     tui.draw();
     let buffer = tui.get_front_buffer();
-    let single_line = 4 * 30;
+    let single_line = 3 * 30;
+    let single_line_focus = 4 * 30;
     let composer_top = 5 * 30;
     assert_eq!(buffer.cells[composer_top].ch, '┏');
-    assert_eq!(buffer.cells[single_line + 29].ch, ' ');
+    assert_eq!(buffer.cells[single_line_focus + 29].ch, ' ');
     assert_ne!(buffer.cells[composer_top].fg & TB_BOLD, 0);
 
     tui.handle_input_event(Event::Key(Key::Tab));
@@ -123,12 +124,22 @@ fn dual_inputs_are_visible_and_tab_toggles_focus() {
     tui.draw();
     let buffer = tui.get_front_buffer();
     assert_eq!(buffer.cells[single_line + 29].ch, ' ');
-    assert_ne!(buffer.cells[single_line + 29].fg & TB_BOLD, 0);
-    assert_ne!(buffer.cells[single_line + 29].fg & TB_UNDERLINE, 0);
+    assert_eq!(buffer.cells[single_line_focus + 29].ch, '━');
+    assert_ne!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
     assert_eq!(buffer.cells[composer_top].fg & TB_BOLD, 0);
+
+    enter_string(&mut tui, "command text");
+    tui.draw();
+    let buffer = tui.get_front_buffer();
+    assert_eq!(buffer.cells[single_line_focus + 29].ch, '━');
+    assert_ne!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
 
     tui.handle_input_event(Event::Key(Key::Tab));
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    tui.draw();
+    let buffer = tui.get_front_buffer();
+    assert_eq!(buffer.cells[single_line_focus + 29].ch, ' ');
+    assert_eq!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
 }
 
 #[test]

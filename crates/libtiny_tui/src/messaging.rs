@@ -1,4 +1,4 @@
-use termbox_simple::Termbox;
+use termbox_simple::{TB_BOLD, Termbox};
 
 use std::convert::From;
 
@@ -158,7 +158,6 @@ impl MessagingUI {
                         pos_y,
                         self.height,
                         &mut self.msg_area,
-                        false,
                     );
                     self.msg_area.draw(tb, colors, pos_x, pos_y);
                     if self.msg_area.is_scrolled() && self.width > 0 {
@@ -174,16 +173,27 @@ impl MessagingUI {
                 }
                 let composer_height = Composer::height(self.height);
                 let single_line_region_height = self.height - composer_height;
+                let focus_line_y = pos_y + single_line_region_height - 1;
                 // Draw InputArea first because it can trigger a resize of MsgArea.
                 self.input_field.draw(
                     tb,
                     colors,
                     pos_x,
                     pos_y,
-                    single_line_region_height,
+                    single_line_region_height - 1,
                     &mut self.msg_area,
-                    self.input_focus == InputFocus::SingleLine,
                 );
+                if self.input_focus == InputFocus::SingleLine {
+                    for x in pos_x..pos_x + self.width {
+                        tb.change_cell(
+                            x,
+                            focus_line_y,
+                            '━',
+                            colors.user_msg.fg | TB_BOLD,
+                            colors.user_msg.bg,
+                        );
+                    }
+                }
                 self.composer.draw(
                     tb,
                     colors,
@@ -299,7 +309,11 @@ impl MessagingUI {
         };
         #[cfg(not(test))]
         let composer_height = Composer::height(height);
-        let input_height = self.input_field.get_height(width) + composer_height;
+        #[cfg(test)]
+        let focus_line_height = i32::from(!self.legacy_single_line_layout);
+        #[cfg(not(test))]
+        let focus_line_height = 1;
+        let input_height = self.input_field.get_height(width) + focus_line_height + composer_height;
         let msg_area_height = height - input_height;
         self.msg_area.resize(width, msg_area_height);
 

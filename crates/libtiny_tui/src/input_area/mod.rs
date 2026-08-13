@@ -1,7 +1,7 @@
 use std::cmp::{max, min};
 use std::mem;
 
-use termbox_simple::{TB_BOLD, TB_UNDERLINE, Termbox};
+use termbox_simple::Termbox;
 
 use crate::config::{Colors, Style};
 use crate::key_map::KeyAction;
@@ -146,7 +146,6 @@ impl InputArea {
         parent_y: i32,
         parent_height: i32,
         msg_area: &mut MsgArea,
-        focused: bool,
     ) {
         let input_field_height = self.get_height(self.width);
         // if the height of msg_area needs to change...
@@ -154,20 +153,6 @@ impl InputArea {
             msg_area.resize(self.width, parent_height - input_field_height);
         }
         let pos_y = parent_y + parent_height - input_field_height;
-        if focused {
-            // A full-width underline marks focus without reducing the command field's capacity.
-            for y in pos_y..pos_y + input_field_height {
-                for x in pos_x..pos_x + self.width {
-                    tb.change_cell(
-                        x,
-                        y,
-                        ' ',
-                        colors.user_msg.fg | TB_BOLD | TB_UNDERLINE,
-                        colors.user_msg.bg,
-                    );
-                }
-            }
-        }
         let mut nick_length = 0;
         if let Some(nick) = &self.nick {
             nick.draw(tb, colors, pos_x, pos_y, self.width);
