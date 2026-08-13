@@ -19,6 +19,7 @@ pub(crate) struct PendingRequests {
 struct PendingRequest {
     origin: MsgSource,
     response_command_prefix: String,
+    command_label: String,
 }
 
 pub(crate) struct LocalResponse {
@@ -49,9 +50,15 @@ struct ResponseError {
 
 impl PendingRequests {
     pub(crate) fn record(&self, origin: MsgSource, command: &str) {
+        let command_label = command.trim_start_matches('/');
+        let command_name = command_label
+            .split_whitespace()
+            .next()
+            .unwrap_or(command_label);
         self.inner.borrow_mut().push_back(PendingRequest {
             origin,
-            response_command_prefix: format!("travel.{command}"),
+            response_command_prefix: format!("travel.{command_name}"),
+            command_label: command_label.to_owned(),
         });
     }
 
@@ -86,7 +93,7 @@ impl PendingRequests {
 
         Some(LocalResponse {
             origin: request.origin,
-            lines: format_response(response),
+            lines: format_response(response, &request.command_label),
         })
     }
 
@@ -100,7 +107,7 @@ impl PendingRequests {
     }
 }
 
-fn format_response(response: Response) -> Vec<String> {
+fn format_response(response: Response, command_label: &str) -> Vec<String> {
     match response.outcome {
         Outcome::Error { error } => vec![format!(
             "Sledteam {}: {} ({})",
@@ -109,7 +116,10 @@ fn format_response(response: Response) -> Vec<String> {
         Outcome::Ok { data: None } => vec![format!("Sledteam {}: ok", response.command)],
         Outcome::Ok { data: Some(data) } => {
             if let Some(lines) = format_travel_tree(&response.command, &data) {
-                return lines;
+                let mut labeled = Vec::with_capacity(lines.len() + 1);
+                labeled.push(command_label.to_owned());
+                labeled.extend(lines);
+                return labeled;
             }
             let mut lines = vec![format!("Sledteam {}:", response.command)];
             format_value(&data, 0, &mut lines);
@@ -309,6 +319,10 @@ mod tests {
         .unwrap()
     }
 
+    fn tree_response(command: &str, label: &str, data: &str) -> Vec<String> {
+        format_response(ok_response(command, data), label)
+    }
+
     #[test]
     fn matches_out_of_order_responses_by_command() {
         let pending = PendingRequests::default();
@@ -324,7 +338,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.origin, channel("irc", "#second"));
-        assert_eq!(response.lines, ["Moonshot", "└── North"]);
+        assert_eq!(response.lines, ["ets", "Moonshot", "└── North"]);
         assert_eq!(pending.origins(), [channel("irc", "#first")]);
     }
 
@@ -349,26 +363,51 @@ mod tests {
     }
 
     #[test]
+    fn addressed_request_supplies_the_local_label_without_a_slash() {
+        let pending = PendingRequests::default();
+        pending.record(channel("irc", "#camp"), "/span list Beta");
+
+        let response = pending
+            .consume(
+                "irc",
+                NICK,
+                r#"{"schema_version":1,"command":"travel.span.list","status":"ok","data":{"trail":{"ulid":"T1","name":"Beta"},"spans":[]}}"#,
+            )
+            .unwrap();
+
+        assert_eq!(response.lines, ["span list Beta", "└── Beta"]);
+    }
+
+    #[test]
     fn ets_tree_handles_zero_one_and_multiple_spans() {
-        let zero = format_response(ok_response(
+        let zero = tree_response(
             "travel.ets",
+            "ets",
             r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[]}"#,
-        ));
-        assert_eq!(zero, ["Moonshot", "└── irc"]);
+        );
+        assert_eq!(zero, ["ets", "Moonshot", "└── irc"]);
 
-        let one = format_response(ok_response(
+        let one = tree_response(
             "travel.ets",
+            "ets",
             r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"}]}"#,
-        ));
-        assert_eq!(one, ["Moonshot", "└── irc", "    └── ux"]);
+        );
+        assert_eq!(one, ["ets", "Moonshot", "└── irc", "    └── ux"]);
 
-        let many = format_response(ok_response(
+        let many = tree_response(
             "travel.ets",
+            "ets",
             r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"},{"ulid":"S2","name":"multiline"}]}"#,
-        ));
+        );
         assert_eq!(
             many,
-            ["Moonshot", "└── irc", "    ├── ux", "    └── multiline"]
+            [
+                "ets",
+                "Moonshot",
+                "└── irc",
+                "    ├── ux",
+                "    └── multiline"
+            ]
         );
     }
 
@@ -376,14 +415,18 @@ mod tests {
     fn expedition_tree_marks_current_ulid_and_handles_no_current() {
         let data = r#"{"current":{"expedition_id":"E2","trail_id":"T9"},"expeditions":[{"ulid":"E1","name":"Moonshot","project_root":"/secret","kind":"standard"},{"ulid":"E2","name":"Another Expedition"}]}"#;
         assert_eq!(
-            format_response(ok_response("travel.expedition.list", data)),
-            ["├── Moonshot", "└── \u{2}Another Expedition\u{2}"]
+            tree_response("travel.expedition.list", "expedition list", data),
+            [
+                "expedition list",
+                "├── Moonshot",
+                "└── \u{2}Another Expedition\u{2}"
+            ]
         );
 
         let data = r#"{"current":null,"expeditions":[{"ulid":"E1","name":"Moonshot"}]}"#;
         assert_eq!(
-            format_response(ok_response("travel.expedition.list", data)),
-            ["└── Moonshot"]
+            tree_response("travel.expedition.list", "expedition list", data),
+            ["expedition list", "└── Moonshot"]
         );
     }
 
@@ -391,22 +434,40 @@ mod tests {
     fn trail_tree_only_marks_an_exact_current_ulid() {
         let data = r#"{"current":{"expedition_id":"OTHER","trail_id":"T9"},"expedition":{"ulid":"E1","name":"Moonshot"},"trails":[{"ulid":"T1","name":"planning"},{"ulid":"T2","name":"irc"}]}"#;
         assert_eq!(
-            format_response(ok_response("travel.trail.list", data)),
-            ["└── Moonshot", "    ├── planning", "    └── irc"]
+            tree_response("travel.trail.list", "trail list Moonshot", data),
+            [
+                "trail list Moonshot",
+                "└── Moonshot",
+                "    ├── planning",
+                "    └── irc"
+            ]
         );
 
         let data = r#"{"current":{"expedition_id":"E1","trail_id":"T2"},"expedition":{"ulid":"E1","name":"Moonshot"},"trails":[{"ulid":"T1","name":"planning"},{"ulid":"T2","name":"irc"}]}"#;
         assert_eq!(
-            format_response(ok_response("travel.trail.list", data)),
-            ["└── Moonshot", "    ├── planning", "    └── \u{2}irc\u{2}"]
+            tree_response("travel.trail.list", "trail list", data),
+            [
+                "trail list",
+                "└── Moonshot",
+                "    ├── planning",
+                "    └── \u{2}irc\u{2}"
+            ]
         );
     }
 
     #[test]
     fn span_tree_omits_expedition_and_active_styling() {
         let data = r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"},{"ulid":"S2","name":"multiline"}]}"#;
-        let lines = format_response(ok_response("travel.span.list", data));
-        assert_eq!(lines, ["└── irc", "    ├── ux", "    └── multiline"]);
+        let lines = tree_response("travel.span.list", "span list irc", data);
+        assert_eq!(
+            lines,
+            [
+                "span list irc",
+                "└── irc",
+                "    ├── ux",
+                "    └── multiline"
+            ]
+        );
         let rendered = lines.join("");
         assert!(!rendered.contains('\u{2}'));
         assert!(!rendered.contains("Moonshot"));
@@ -416,10 +477,10 @@ mod tests {
     #[test]
     fn unsupported_success_response_keeps_structured_fallback() {
         assert_eq!(
-            format_response(ok_response(
-                "travel.expedition.add",
-                r#"{"name":"Moonshot"}"#
-            )),
+            format_response(
+                ok_response("travel.expedition.add", r#"{"name":"Moonshot"}"#),
+                "expedition add Moonshot"
+            ),
             ["Sledteam travel.expedition.add:", "name: Moonshot"]
         );
     }

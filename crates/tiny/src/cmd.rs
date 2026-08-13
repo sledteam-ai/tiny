@@ -224,7 +224,7 @@ fn send_sledserv(args: CmdArgs, command: &str) {
     let client = find_client(clients, src.serv_name()).unwrap();
     for chunk in client.split_privmsg(crate::sledserv::NICK.len(), &msg) {
         client.privmsg(crate::sledserv::NICK, chunk, false);
-        ui.record_sledserv_request(src.clone(), command);
+        ui.record_sledserv_request(src.clone(), &msg);
     }
 }
 
