@@ -192,8 +192,8 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
             #[rustfmt::skip]
             let screen =
             "|00:00 tiny_test_user: msg to chan       |
+             |osa1:                                   |
              |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┃                                      ┃|
              |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
              |x.y.z #chan tiny_test_user              |";
 
@@ -215,8 +215,8 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
             #[rustfmt::skip]
             let screen =
             "|tiny IRC client -- please ignore        |
+             |osa1:                                   |
              |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┃                                      ┃|
              |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
              |x.y.z #chan tiny_test_user              |";
 
@@ -277,8 +277,8 @@ fn test_bouncer_relay_issue_271() {
             #[rustfmt::skip]
             let screen =
             "|00:00 osa1-soju: blah blah              |
+             |osa1-soju:                              |
              |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┃                                      ┃|
              |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
              |x.y.z osa1/oftc                         |";
 
@@ -343,8 +343,8 @@ fn test_privmsg_targetmask_issue_278() {
             #[rustfmt::skip]
             let screen =
             "|tiny IRC client -- please ignore        |
+             |osa1:                                   |
              |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┃                                      ┃|
              |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
              |x.y.z tiny_test_user                    |";
 

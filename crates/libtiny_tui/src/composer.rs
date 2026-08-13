@@ -1,7 +1,7 @@
 //! Implements the deliberately small multiline editing pane used by `MessagingUI`.
 //!
-//! Input is routed here only while a tab is composing; submission returns logical lines to the
-//! existing multiline send flow. Cursor movement is character-based and selection-free.
+//! `MessagingUI` routes input here while the pane has focus, and submission returns logical lines
+//! to the existing multiline send flow. Cursor movement is character-based and selection-free.
 
 use crate::config::Colors;
 use crate::key_map::KeyAction;
@@ -15,42 +15,27 @@ pub(crate) struct Composer {
     cursor: usize,
     preferred_column: Option<usize>,
     scroll: usize,
-    original_input: String,
-    original_cursor: i32,
 }
 
 impl Composer {
-    pub(crate) fn new(original_input: String, original_cursor: i32, pasted: &str) -> Self {
-        let mut buffer: Vec<char> = original_input.chars().collect();
-        let cursor = (original_cursor as usize).min(buffer.len());
-        let pasted: Vec<char> = normalized_chars(pasted).collect();
-        let pasted_len = pasted.len();
-        buffer.splice(cursor..cursor, pasted);
-        let cursor = cursor + pasted_len;
-
+    pub(crate) fn new() -> Self {
         Composer {
-            buffer,
-            cursor,
+            buffer: Vec::new(),
+            cursor: 0,
             preferred_column: None,
             scroll: 0,
-            original_input,
-            original_cursor,
         }
     }
 
     pub(crate) fn height(parent_height: i32) -> i32 {
         MAX_HEIGHT
             .min((parent_height / 2).max(3))
-            .min(parent_height.max(0))
-    }
-
-    pub(crate) fn cancel(self) -> (String, i32) {
-        (self.original_input, self.original_cursor)
+            // Keep one row each for chat and the command line on very small screens.
+            .min((parent_height - 2).max(0))
     }
 
     pub(crate) fn keypressed(&mut self, action: &KeyAction) -> WidgetRet {
         match action {
-            KeyAction::Cancel => WidgetRet::Remove,
             KeyAction::ComposerSend => {
                 if self.buffer.is_empty() {
                     WidgetRet::KeyHandled
@@ -60,8 +45,6 @@ impl Composer {
                     self.cursor = 0;
                     self.preferred_column = None;
                     self.scroll = 0;
-                    self.original_input.clear();
-                    self.original_cursor = 0;
                     WidgetRet::Lines(text.split('\n').map(str::to_owned).collect())
                 }
             }
@@ -121,7 +104,10 @@ impl Composer {
                 self.insert(*ch);
                 WidgetRet::KeyHandled
             }
-            KeyAction::OpenComposer | KeyAction::InputAutoComplete => WidgetRet::KeyHandled,
+            KeyAction::Cancel
+            | KeyAction::OpenComposer
+            | KeyAction::InputAutoComplete
+            | KeyAction::InputFocusToggle => WidgetRet::KeyHandled,
             KeyAction::TabMoveLeft
             | KeyAction::TabMoveRight
             | KeyAction::TabNext
@@ -148,12 +134,17 @@ impl Composer {
         pos_y: i32,
         width: i32,
         height: i32,
+        focused: bool,
     ) {
         if width <= 0 || height <= 0 {
             return;
         }
 
-        let border_fg = colors.user_msg.fg | TB_BOLD;
+        let border_fg = if focused {
+            colors.user_msg.fg | TB_BOLD
+        } else {
+            colors.user_msg.fg
+        };
         let border_bg = colors.user_msg.bg;
         if width == 1 || height == 1 {
             for x in 0..width {
@@ -218,10 +209,12 @@ impl Composer {
             }
         }
 
-        tb.set_cursor(Some((
-            (pos_x + 1 + cursor_col as i32) as u16,
-            (pos_y + 1 + (cursor_row - self.scroll) as i32) as u16,
-        )));
+        if focused {
+            tb.set_cursor(Some((
+                (pos_x + 1 + cursor_col as i32) as u16,
+                (pos_y + 1 + (cursor_row - self.scroll) as i32) as u16,
+            )));
+        }
     }
 
     fn insert(&mut self, ch: char) {
@@ -301,7 +294,8 @@ mod tests {
 
     #[test]
     fn enter_inserts_newline_and_submit_returns_all_lines() {
-        let mut composer = Composer::new(String::new(), 0, "one");
+        let mut composer = Composer::new();
+        composer.insert_text("one");
         assert!(matches!(
             composer.keypressed(&KeyAction::InputSend),
             WidgetRet::KeyHandled
@@ -319,7 +313,8 @@ mod tests {
 
     #[test]
     fn ctrl_k_deletes_from_cursor_to_end_of_buffer() {
-        let mut composer = Composer::new(String::new(), 0, "one\ntwo");
+        let mut composer = Composer::new();
+        composer.insert_text("one\ntwo");
         composer.cursor = 2;
 
         composer.keypressed(&KeyAction::InputDeleteToEnd);
@@ -330,7 +325,8 @@ mod tests {
 
     #[test]
     fn ctrl_a_moves_to_start_of_current_line() {
-        let mut composer = Composer::new(String::new(), 0, "one\ntwo");
+        let mut composer = Composer::new();
+        composer.insert_text("one\ntwo");
 
         composer.keypressed(&KeyAction::InputMoveCursStart);
 
@@ -339,7 +335,8 @@ mod tests {
 
     #[test]
     fn vertical_movement_preserves_column_across_short_lines() {
-        let mut composer = Composer::new(String::new(), 0, "abcd\nx\nwxyz");
+        let mut composer = Composer::new();
+        composer.insert_text("abcd\nx\nwxyz");
         composer.cursor = 3;
         composer.move_vertical(true);
         assert_eq!(composer.cursor, 6);
@@ -352,8 +349,11 @@ mod tests {
     }
 
     #[test]
-    fn paste_is_normalized_and_inserted_at_the_single_line_cursor() {
-        let composer = Composer::new("ac".to_owned(), 1, "b\r\nc\rd");
+    fn paste_is_normalized_and_inserted_at_the_composer_cursor() {
+        let mut composer = Composer::new();
+        composer.insert_text("ac");
+        composer.cursor = 1;
+        composer.insert_text("b\r\nc\rd");
         assert_eq!(composer.buffer.iter().collect::<String>(), "ab\nc\ndc");
         assert_eq!(composer.cursor, 6);
     }

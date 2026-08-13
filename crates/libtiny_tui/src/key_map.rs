@@ -19,6 +19,7 @@ pub(crate) enum KeyAction {
     OpenComposer,
 
     ComposerSend,
+    InputFocusToggle,
 
     TabNext,
     TabPrev,
@@ -59,10 +60,7 @@ impl Default for KeyMap {
         let map = [
             (Key::Esc, KeyAction::Cancel),
             (Key::Ctrl('c'), KeyAction::Exit),
-            (Key::Ctrl('x'), KeyAction::OpenComposer),
-            // Some terminals report Ctrl+Enter as the same line feed as Ctrl+J.
-            (Key::Ctrl('j'), KeyAction::ComposerSend),
-            (Key::CtrlEnter, KeyAction::ComposerSend),
+            (Key::Ctrl('s'), KeyAction::ComposerSend),
             (Key::Ctrl('n'), KeyAction::TabNext),
             (Key::Ctrl('p'), KeyAction::TabPrev),
             (Key::AltArrow(Arrow::Left), KeyAction::TabMoveLeft),
@@ -92,7 +90,7 @@ impl Default for KeyMap {
             (Key::MouseWheelDown, KeyAction::MessagesScrollDown),
             (Key::Home, KeyAction::MessagesScrollTop),
             (Key::End, KeyAction::MessagesScrollBottom),
-            (Key::Tab, KeyAction::InputAutoComplete),
+            (Key::Tab, KeyAction::InputFocusToggle),
             (Key::Arrow(Arrow::Up), KeyAction::InputPrevEntry),
             (Key::Arrow(Arrow::Down), KeyAction::InputNextEntry),
             (Key::Char('\r'), KeyAction::InputSend),
@@ -314,6 +312,7 @@ impl Display for KeyAction {
             KeyAction::Exit => "exit",
             KeyAction::OpenComposer => "open_composer",
             KeyAction::ComposerSend => "composer_send",
+            KeyAction::InputFocusToggle => "input_focus_toggle",
             KeyAction::TabNext => "tab_next",
             KeyAction::TabPrev => "tab_prev",
             KeyAction::TabMoveLeft => "tab_move_left",
@@ -534,6 +533,15 @@ fn default_alt_arrow_bindings_preserve_tab_movement_and_add_scrollback() {
         keys.get(&Key::AltArrow(Arrow::Down)),
         Some(KeyAction::MessagesScrollChunkDown)
     );
+}
+
+#[test]
+fn default_composer_bindings_toggle_focus_and_submit_with_ctrl_s() {
+    let keys = KeyMap::default();
+    assert_eq!(keys.get(&Key::Tab), Some(KeyAction::InputFocusToggle));
+    assert_eq!(keys.get(&Key::Ctrl('s')), Some(KeyAction::ComposerSend));
+    assert_eq!(keys.get(&Key::Ctrl('x')), None);
+    assert_eq!(keys.get(&Key::CtrlEnter), None);
 }
 
 #[test]

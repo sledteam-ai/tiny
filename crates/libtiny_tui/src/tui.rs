@@ -91,7 +91,7 @@ pub struct TUI {
     tab_configs: TabConfigs,
 
     #[cfg(test)]
-    compose_new_tabs: bool,
+    legacy_single_line_layout: bool,
 }
 
 pub(crate) enum CmdResult {
@@ -120,10 +120,10 @@ impl TUI {
 
     #[cfg(test)]
     pub(crate) fn use_single_line_input(&mut self) {
-        self.compose_new_tabs = false;
+        self.legacy_single_line_layout = true;
         self.tabs[self.active_idx]
             .widget
-            .keypressed(&KeyAction::Cancel);
+            .use_legacy_single_line_layout();
     }
 
     /// Get termbox front buffer. Useful for testing rendering.
@@ -166,7 +166,7 @@ impl TUI {
             config_path,
             tab_configs: TabConfigs::default(),
             #[cfg(test)]
-            compose_new_tabs: true,
+            legacy_single_line_layout: false,
         };
 
         // Init "mentions" tab. This needs to happen right after creating the TUI to be able to
@@ -447,8 +447,8 @@ impl TUI {
             },
         );
         #[cfg(test)]
-        if !self.compose_new_tabs {
-            self.tabs[idx].widget.keypressed(&KeyAction::Cancel);
+        if self.legacy_single_line_layout {
+            self.tabs[idx].widget.use_legacy_single_line_layout();
         }
     }
 
@@ -581,7 +581,7 @@ impl TUI {
                 // translated to carriage returns when pasting so we check for
                 // both just to make sure
                 if str.contains('\n') || str.contains('\r') {
-                    self.tabs[self.active_idx].widget.open_composer(&str);
+                    self.tabs[self.active_idx].widget.paste_into_composer(&str);
                 } else {
                     // TODO this may be too slow for pasting long single lines
                     for ch in str.chars() {

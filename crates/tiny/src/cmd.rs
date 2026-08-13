@@ -771,7 +771,7 @@ fn test_cmds_is_local_and_uses_command_metadata() {
     local.block_on(&runtime, async {
         let (snd_input, rcv_input) = mpsc::channel(1);
         let input = ReceiverStream::new(rcv_input).map(Ok);
-        let (tui, _tui_events) = TUI::run_test(160, 30, input);
+        let (tui, _tui_events) = TUI::run_test(160, 31, input);
         let ui = UI::new(tui.clone(), None);
         ui.new_server_tab("test-server", None);
         let defaults = Defaults {
@@ -794,7 +794,7 @@ fn test_cmds_is_local_and_uses_command_metadata() {
         );
         ui.draw();
 
-        let output = buffer_str(&tui.get_front_buffer(), 160, 30);
+        let output = buffer_str(&tui.get_front_buffer(), 160, 31);
         assert!(output.contains("Available Commands:"));
         for info in command_infos() {
             assert!(
