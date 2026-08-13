@@ -216,16 +216,16 @@ fn send_sledserv(args: CmdArgs, command: &str) {
         ..
     } = args;
 
-    let src = MsgSource::User {
-        serv: src.serv_name().to_owned(),
-        nick: "SledServ".to_owned(),
-    };
     let msg = if args.is_empty() {
         command.to_owned()
     } else {
         format!("{command} {args}")
     };
-    crate::ui::send_msg(ui, clients, &src, msg, false);
+    let client = find_client(clients, src.serv_name()).unwrap();
+    for chunk in client.split_privmsg(crate::sledserv::NICK.len(), &msg) {
+        client.privmsg(crate::sledserv::NICK, chunk, false);
+        ui.record_sledserv_request(src.clone(), command);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -771,7 +771,7 @@ fn test_cmds_is_local_and_uses_command_metadata() {
     local.block_on(&runtime, async {
         let (snd_input, rcv_input) = mpsc::channel(1);
         let input = ReceiverStream::new(rcv_input).map(Ok);
-        let (tui, _tui_events) = TUI::run_test(160, 31, input);
+        let (tui, _tui_events) = TUI::run_test(160, 60, input);
         let ui = UI::new(tui.clone(), None);
         ui.new_server_tab("test-server", None);
         let defaults = Defaults {
@@ -794,7 +794,7 @@ fn test_cmds_is_local_and_uses_command_metadata() {
         );
         ui.draw();
 
-        let output = buffer_str(&tui.get_front_buffer(), 160, 31);
+        let output = buffer_str(&tui.get_front_buffer(), 160, 60);
         assert!(output.contains("Available Commands:"));
         for info in command_infos() {
             assert!(
@@ -907,6 +907,7 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
         assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/ets`"));
 
         run_cmd("ets", source.clone(), &defaults, &ui, &mut clients);
+        assert!(!ui.user_tab_exists("127.0.0.1", crate::sledserv::NICK));
         run_cmd(
             "msg SledServ ets",
             source.clone(),
@@ -951,10 +952,15 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
         );
         run_cmd(
             "msg SledServ span add write schema",
-            source,
+            source.clone(),
             &defaults,
             &ui,
             &mut clients,
+        );
+
+        assert_eq!(
+            ui.pending_sledserv_origins(),
+            [source.clone(), source.clone(), source.clone(), source]
         );
 
         assert_eq!(

@@ -46,6 +46,10 @@ struct TestSetup {
     snd_input_ev: mpsc::Sender<input::Event>,
     /// Send connection events to connection handler (`conn::task`) using this channel
     snd_conn_ev: mpsc::Sender<client::Event>,
+    /// Events emitted by editable input surfaces toward Tiny's IRC send path.
+    rcv_tui_ev: mpsc::Receiver<libtiny_common::Event>,
+    /// UI wrapper shared with the connection handler.
+    ui: UI,
 }
 
 fn run_test<F, Fut>(nick: String, test: F)
@@ -63,7 +67,7 @@ where
         // Create test TUI
         let (snd_input_ev, rcv_input_ev) = mpsc::channel::<term_input::Event>(100);
         let rcv_input_ev = ReceiverStream::new(rcv_input_ev);
-        let (tui, _rcv_tui_ev) =
+        let (tui, rcv_tui_ev) =
             TUI::run_test(DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT, rcv_input_ev.map(Ok));
 
         let tiny_ui = UI::new(tui.clone(), None);
@@ -74,7 +78,7 @@ where
         // Spawn connection event handler task
         tokio::task::spawn_local(conn::task(
             rcv_conn_ev,
-            tiny_ui,
+            tiny_ui.clone(),
             Box::new(TestClient { nick }),
         ));
 
@@ -85,6 +89,8 @@ where
             tui,
             snd_input_ev,
             snd_conn_ev,
+            rcv_tui_ev,
+            ui: tiny_ui,
         })
         .await;
     });
@@ -98,6 +104,7 @@ fn test_own_join_focuses_channel_tab() {
              tui,
              snd_input_ev,
              snd_conn_ev,
+             ..
          }| async move {
             let chan = ChanName::new("#camp".to_owned());
             let join = Msg {
@@ -131,6 +138,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
              tui,
              snd_input_ev,
              snd_conn_ev,
+             ..
          }| async move {
             snd_conn_ev.send(client::Event::Connected).await.unwrap();
             snd_conn_ev
@@ -193,8 +201,8 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
             let screen =
             "|00:00 tiny_test_user: msg to chan       |
              |osa1:                                   |
-             |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
+             |                                        |
+             |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━|
              |x.y.z #chan tiny_test_user              |";
 
             let mut front_buffer = tui.get_front_buffer();
@@ -216,8 +224,8 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
             let screen =
             "|tiny IRC client -- please ignore        |
              |osa1:                                   |
-             |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
+             |                                        |
+             |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━|
              |x.y.z #chan tiny_test_user              |";
 
             let mut front_buffer = tui.get_front_buffer();
@@ -241,6 +249,7 @@ fn test_bouncer_relay_issue_271() {
              tui,
              snd_input_ev,
              snd_conn_ev,
+             ..
          }| async move {
             snd_conn_ev.send(client::Event::Connected).await.unwrap();
             snd_conn_ev
@@ -278,8 +287,8 @@ fn test_bouncer_relay_issue_271() {
             let screen =
             "|00:00 osa1-soju: blah blah              |
              |osa1-soju:                              |
-             |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
+             |                                        |
+             |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━|
              |x.y.z osa1/oftc                         |";
 
             let mut front_buffer = tui.get_front_buffer();
@@ -296,6 +305,71 @@ fn test_bouncer_relay_issue_271() {
 }
 
 #[test]
+fn test_sledserv_response_is_local_to_command_origin() {
+    run_test(
+        "osa1".to_owned(),
+        |TestSetup {
+             tui,
+             snd_input_ev,
+             snd_conn_ev,
+             mut rcv_tui_ev,
+             ui,
+         }| async move {
+            let origin_chan = ChanName::new("#origin".to_owned());
+            tui.new_chan_tab(SERV_NAME, &origin_chan);
+            let origin = MsgSource::Chan {
+                serv: SERV_NAME.to_owned(),
+                chan: origin_chan.clone(),
+            };
+            ui.record_sledserv_request(origin.clone(), "ets");
+
+            // Move away while the request is in flight; receipt must not retarget the result.
+            next_tab(&snd_input_ev).await;
+            yield_(3).await;
+            assert_ne!(tui.current_tab(), Some(origin.clone()));
+
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    pfx: Some(Pfx::User {
+                        nick: "SledServ".to_owned(),
+                        user: "sledserv-service@localhost".to_owned(),
+                    }),
+                    cmd: Cmd::PRIVMSG {
+                        target: MsgTarget::User("osa1".to_owned()),
+                        msg: r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"trail":{"name":"North"}}}"#.to_owned(),
+                        is_notice: false,
+                        ctcp: None,
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(5).await;
+
+            assert!(!ui.user_tab_exists(SERV_NAME, "SledServ"));
+            assert!(ui.pending_sledserv_origins().is_empty());
+            assert_eq!(
+                tui.current_tab(),
+                Some(MsgSource::Serv {
+                    serv: SERV_NAME.to_owned()
+                })
+            );
+            tui.focus_chan_tab(SERV_NAME, &origin_chan);
+            tui.draw();
+            let output = libtiny_tui::test_utils::buffer_str(
+                &tui.get_front_buffer(),
+                DEFAULT_TUI_WIDTH,
+                DEFAULT_TUI_HEIGHT,
+            );
+            assert!(output.contains("name: North"));
+            assert!(matches!(
+                rcv_tui_ev.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ));
+        },
+    )
+}
+
+#[test]
 fn test_privmsg_targetmask_issue_278() {
     run_test(
         "osa1".to_owned(),
@@ -303,6 +377,7 @@ fn test_privmsg_targetmask_issue_278() {
              tui,
              snd_input_ev,
              snd_conn_ev,
+             ..
          }| async move {
             next_tab(&snd_input_ev).await;
             snd_conn_ev.send(client::Event::Connected).await.unwrap();
@@ -344,8 +419,8 @@ fn test_privmsg_targetmask_issue_278() {
             let screen =
             "|tiny IRC client -- please ignore        |
              |osa1:                                   |
-             |┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓|
-             |┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛|
+             |                                        |
+             |━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━|
              |x.y.z tiny_test_user                    |";
 
             let mut front_buffer = tui.get_front_buffer();

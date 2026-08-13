@@ -2,6 +2,7 @@
 
 use crate::cmd::run_cmd;
 use crate::config;
+use crate::sledserv::PendingRequests;
 use libtiny_client::Client;
 use libtiny_common::{ChanNameRef, MsgSource, MsgTarget, TabStyle};
 use libtiny_logger::Logger;
@@ -36,11 +37,16 @@ macro_rules! delegate_ui {
 pub(crate) struct UI {
     ui: TUI,
     logger: Option<Logger>,
+    sledserv_requests: PendingRequests,
 }
 
 impl UI {
     pub(crate) fn new(ui: TUI, logger: Option<Logger>) -> UI {
-        UI { ui, logger }
+        UI {
+            ui,
+            logger,
+            sledserv_requests: PendingRequests::default(),
+        }
     }
 
     pub(crate) fn new_server_tab(&self, serv_name: &str, alias: Option<String>) {
@@ -96,6 +102,26 @@ impl UI {
 
     pub(crate) fn current_tab(&self) -> Option<MsgSource> {
         self.ui.current_tab()
+    }
+
+    pub(crate) fn record_sledserv_request(&self, origin: MsgSource, command: &str) {
+        self.sledserv_requests.record(origin, command);
+    }
+
+    pub(crate) fn consume_sledserv_reply(&self, serv: &str, sender: &str, msg: &str) -> bool {
+        let Some(response) = self.sledserv_requests.consume(serv, sender, msg) else {
+            return false;
+        };
+        let target = response.origin.to_target();
+        for line in response.lines {
+            self.add_client_msg(&line, &target);
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_sledserv_origins(&self) -> Vec<MsgSource> {
+        self.sledserv_requests.origins()
     }
 }
 

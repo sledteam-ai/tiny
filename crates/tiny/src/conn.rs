@@ -173,6 +173,15 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                 User { ref nick, .. } | Ambiguous(ref nick) => nick,
             };
 
+            if sender.eq_ignore_ascii_case(crate::sledserv::NICK)
+                && matches!(target, wire::MsgTarget::User(ref target) if target == &client.get_nick())
+                && !is_notice
+                && ctcp.is_none()
+                && ui.consume_sledserv_reply(serv, sender, &msg)
+            {
+                return;
+            }
+
             if ctcp == Some(wire::CTCP::Version) {
                 let msg_target = if ui.user_tab_exists(serv, sender) {
                     MsgTarget::User { serv, nick: sender }

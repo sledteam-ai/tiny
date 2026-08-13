@@ -5,6 +5,7 @@ mod cmd;
 mod config;
 mod conn;
 mod debug_logging;
+mod sledserv;
 mod ui;
 mod utils;
 
