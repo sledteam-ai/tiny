@@ -16,6 +16,7 @@ use crate::config::{Colors, Config, TabConfig, TabConfigs, parse_config};
 use crate::key_map::{KeyAction, KeyMap};
 use crate::messaging::{MessagingUI, Timestamp};
 use crate::msg_area::Layout;
+use crate::navigation_dialog;
 use crate::notifier::Notifier;
 use crate::tab::{Tab, tab_style};
 use crate::widget::WidgetRet;
@@ -90,6 +91,8 @@ pub struct TUI {
     /// TabConfig settings loaded from config file
     tab_configs: TabConfigs,
 
+    navigation_dialog_visible: bool,
+
     #[cfg(test)]
     legacy_single_line_layout: bool,
 }
@@ -132,6 +135,11 @@ impl TUI {
     }
 
     #[cfg(test)]
+    pub(crate) fn navigation_dialog_visible(&self) -> bool {
+        self.navigation_dialog_visible
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_layout(&mut self, layout: Layout) {
         self.msg_layout = layout
     }
@@ -165,6 +173,7 @@ impl TUI {
             key_map: KeyMap::default(),
             config_path,
             tab_configs: TabConfigs::default(),
+            navigation_dialog_visible: false,
             #[cfg(test)]
             legacy_single_line_layout: false,
         };
@@ -577,6 +586,9 @@ impl TUI {
             Event::Key(key) => self.keypressed(key),
 
             Event::String(str) => {
+                if self.navigation_dialog_visible {
+                    return None;
+                }
                 // For some reason on my terminal newlines in text are
                 // translated to carriage returns when pasting so we check for
                 // both just to make sure
@@ -596,6 +608,19 @@ impl TUI {
     }
 
     fn keypressed(&mut self, key: Key) -> Option<TUIRet> {
+        if key == Key::Esc {
+            if self.navigation_dialog_visible {
+                self.navigation_dialog_visible = false;
+                return None;
+            }
+            if !self.tabs[self.active_idx].widget.has_exit_dialogue() {
+                self.navigation_dialog_visible = true;
+                return None;
+            }
+        } else if self.navigation_dialog_visible {
+            return None;
+        }
+
         let key_action = self.key_map.get(&key).or(match key {
             Key::Char(c) => Some(KeyAction::Input(c)),
             Key::AltChar(c) => Some(KeyAction::TabGoto(c)),
@@ -916,6 +941,10 @@ impl TUI {
                 .unwrap_or(self.colors.tab_normal);
             self.tb
                 .change_cell(pos_x, self.height - 1, RIGHT_ARROW, style.fg, style.bg);
+        }
+
+        if self.navigation_dialog_visible {
+            navigation_dialog::draw(&mut self.tb, &self.colors, self.width, self.height);
         }
 
         self.tb.present();

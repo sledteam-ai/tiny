@@ -10,6 +10,7 @@ mod line_split;
 mod messaging;
 #[doc(hidden)]
 pub mod msg_area; // Public to be able to use in an example
+mod navigation_dialog;
 mod notifier;
 mod tab;
 mod termbox;

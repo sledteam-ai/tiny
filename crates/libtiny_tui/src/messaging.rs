@@ -332,6 +332,10 @@ impl MessagingUI {
         self.composer.insert_text(pasted);
     }
 
+    pub(crate) fn has_exit_dialogue(&self) -> bool {
+        self.exit_dialogue.is_some()
+    }
+
     #[cfg(test)]
     pub(crate) fn input_focus(&self) -> &'static str {
         match self.input_focus {
