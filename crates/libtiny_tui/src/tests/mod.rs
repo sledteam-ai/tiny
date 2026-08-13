@@ -113,6 +113,57 @@ fn hidden_mentions_tab_still_receives_messages() {
 }
 
 #[test]
+fn alt_arrows_scroll_each_tab_independently_and_show_indicator() {
+    let mut tui = TUI::new_test(24, 6);
+    let first = "first.example.org";
+    let second = "second.example.org";
+    tui.new_server_tab(first, None);
+    tui.new_server_tab(second, None);
+    tui.next_tab();
+
+    let ts = time::empty_tm();
+    for line in 0..10 {
+        tui.add_msg(
+            &format!("line{line}"),
+            ts,
+            &MsgTarget::Server { serv: first },
+        );
+    }
+
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)), &mut None);
+    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 5);
+    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 0);
+
+    tui.add_msg("new", ts, &MsgTarget::Server { serv: first });
+    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 6);
+
+    tui.draw();
+    let screen = crate::test_utils::buffer_str(&tui.get_front_buffer(), 24, 6);
+    assert!(screen.lines().next().unwrap().ends_with('↑'));
+
+    tui.next_tab();
+    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 0);
+    tui.prev_tab();
+    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 6);
+
+    tui.handle_input_event(
+        Event::Key(Key::AltArrow(term_input::Arrow::Down)),
+        &mut None,
+    );
+    tui.handle_input_event(
+        Event::Key(Key::AltArrow(term_input::Arrow::Down)),
+        &mut None,
+    );
+    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 0);
+
+    tui.add_msg("live", ts, &MsgTarget::Server { serv: first });
+    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 0);
+    tui.draw();
+    let screen = crate::test_utils::buffer_str(&tui.get_front_buffer(), 24, 6);
+    assert!(!screen.contains('↑'));
+}
+
+#[test]
 fn close_rightmost_tab() {
     // After closing right-most tab the tab bar should scroll left.
     let mut tui = TUI::new_test(20, 4);

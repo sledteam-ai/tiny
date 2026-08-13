@@ -27,6 +27,8 @@ pub(crate) enum KeyAction {
     MessagesPageDown,
     MessagesScrollUp,
     MessagesScrollDown,
+    MessagesScrollChunkUp,
+    MessagesScrollChunkDown,
     MessagesScrollTop,
     MessagesScrollBottom,
 
@@ -59,6 +61,11 @@ impl Default for KeyMap {
             (Key::Ctrl('p'), KeyAction::TabPrev),
             (Key::AltArrow(Arrow::Left), KeyAction::TabMoveLeft),
             (Key::AltArrow(Arrow::Right), KeyAction::TabMoveRight),
+            (Key::AltArrow(Arrow::Up), KeyAction::MessagesScrollChunkUp),
+            (
+                Key::AltArrow(Arrow::Down),
+                KeyAction::MessagesScrollChunkDown,
+            ),
             (Key::AltChar('1'), KeyAction::TabGoto('1')),
             (Key::AltChar('2'), KeyAction::TabGoto('2')),
             (Key::AltChar('3'), KeyAction::TabGoto('3')),
@@ -307,6 +314,8 @@ impl Display for KeyAction {
             KeyAction::MessagesPageDown => "messages_page_down",
             KeyAction::MessagesScrollUp => "messages_scroll_up",
             KeyAction::MessagesScrollDown => "messages_scroll_down",
+            KeyAction::MessagesScrollChunkUp => "messages_scroll_chunk_up",
+            KeyAction::MessagesScrollChunkDown => "messages_scroll_chunk_down",
             KeyAction::MessagesScrollTop => "messages_scroll_top",
             KeyAction::MessagesScrollBottom => "messages_scroll_bottom",
             KeyAction::Input(c) => return writeln!(f, "input_{c}"),
@@ -494,6 +503,27 @@ fn deser_defaults() {
     let defaults_str = defaults.to_string();
     let defaults_deser: KeyMap = serde_yaml::from_str(&defaults_str).unwrap();
     assert_eq!(defaults, defaults_deser);
+}
+
+#[test]
+fn default_alt_arrow_bindings_preserve_tab_movement_and_add_scrollback() {
+    let keys = KeyMap::default();
+    assert_eq!(
+        keys.get(&Key::AltArrow(Arrow::Left)),
+        Some(KeyAction::TabMoveLeft)
+    );
+    assert_eq!(
+        keys.get(&Key::AltArrow(Arrow::Right)),
+        Some(KeyAction::TabMoveRight)
+    );
+    assert_eq!(
+        keys.get(&Key::AltArrow(Arrow::Up)),
+        Some(KeyAction::MessagesScrollChunkUp)
+    );
+    assert_eq!(
+        keys.get(&Key::AltArrow(Arrow::Down)),
+        Some(KeyAction::MessagesScrollChunkDown)
+    );
 }
 
 #[test]

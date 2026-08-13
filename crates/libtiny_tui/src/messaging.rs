@@ -56,6 +56,8 @@ pub(crate) struct Timestamp {
 static WHITESPACE: &str =
     "                                                                                ";
 
+const SCROLLBACK_INDICATOR: char = '↑';
+
 impl Timestamp {
     /// The width of a timestamp plus a space.
     pub(crate) const WIDTH: usize = 6;
@@ -135,6 +137,15 @@ impl MessagingUI {
             }
         }
         self.msg_area.draw(tb, colors, pos_x, pos_y);
+        if self.msg_area.is_scrolled() && self.width > 0 {
+            tb.change_cell(
+                pos_x + self.width - 1,
+                pos_y,
+                SCROLLBACK_INDICATOR,
+                colors.tab_active.fg,
+                colors.tab_active.bg,
+            );
+        }
     }
 
     pub(crate) fn keypressed(&mut self, key_action: &KeyAction) -> WidgetRet {
@@ -157,6 +168,14 @@ impl MessagingUI {
             }
             KeyAction::MessagesScrollDown => {
                 self.msg_area.scroll_down();
+                WidgetRet::KeyHandled
+            }
+            KeyAction::MessagesScrollChunkUp => {
+                self.msg_area.scroll_chunk_up();
+                WidgetRet::KeyHandled
+            }
+            KeyAction::MessagesScrollChunkDown => {
+                self.msg_area.scroll_chunk_down();
                 WidgetRet::KeyHandled
             }
             KeyAction::MessagesScrollTop => {
@@ -206,6 +225,11 @@ impl MessagingUI {
         if let Some(exit_dialogue) = &mut self.exit_dialogue {
             exit_dialogue.resize(width);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_offset(&self) -> i32 {
+        self.msg_area.scroll_offset()
     }
 
     /// Get contents of the input field and cursor location and clear it.

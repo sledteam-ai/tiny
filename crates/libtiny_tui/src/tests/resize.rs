@@ -52,7 +52,7 @@ fn test_resize_recalc_scroll() {
     // should be at the top of message after resize
     #[rustfmt::skip]
     let screen2 =
-       "|00:00 osa1: s   |
+       "|00:00 osa1: s  ↑|
         |1111 1111 1111  |
         |1111 1111 1111  |
         |1111 1111 1111  |
@@ -129,7 +129,7 @@ fn test_resize_scroll_stick_to_top() {
 
     #[rustfmt::skip]
     let screen2 =
-       "|osa1: line5       |
+       "|osa1: line5      ↑|
         |osa1: line6       |
         |osa1: line7       |
         |osa1: line8       |

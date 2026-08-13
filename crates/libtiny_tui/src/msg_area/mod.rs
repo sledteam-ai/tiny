@@ -9,6 +9,8 @@ use crate::config::Colors;
 use crate::line_split::LineType;
 use crate::messaging::{MSG_NICK_SUFFIX_LEN, Timestamp};
 
+const SCROLL_CHUNK_LINES: i32 = 5;
+
 pub(crate) struct MsgArea {
     lines: VecDeque<Line>,
     scrollback: usize,
@@ -173,6 +175,24 @@ impl MsgArea {
         }
     }
 
+    pub(crate) fn scroll_chunk_up(&mut self) {
+        let max_scroll = max(0, self.update_total_visible_lines() - self.height);
+        self.scroll = (self.scroll + SCROLL_CHUNK_LINES).min(max_scroll);
+    }
+
+    pub(crate) fn scroll_chunk_down(&mut self) {
+        self.scroll = max(0, self.scroll - SCROLL_CHUNK_LINES);
+    }
+
+    pub(crate) fn is_scrolled(&self) -> bool {
+        self.scroll > 0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_offset(&self) -> i32 {
+        self.scroll
+    }
+
     pub(crate) fn scroll_top(&mut self) {
         self.scroll = max(0, self.update_total_visible_lines() - self.height);
     }
@@ -266,6 +286,33 @@ mod tests {
         msg_area.add_text("line3", SegStyle::UserMsg);
         msg_area.flush_line();
         assert_eq!(msg_area.scroll, 2);
+    }
+
+    #[test]
+    fn chunk_scrolling_preserves_position_and_returns_to_live_follow() {
+        let mut msg_area = MsgArea::new(100, 3, usize::MAX, Layout::Compact);
+        for line in 0..10 {
+            msg_area.add_text(&format!("line{line}"), SegStyle::UserMsg);
+            msg_area.flush_line();
+        }
+
+        msg_area.scroll_chunk_up();
+        assert_eq!(msg_area.scroll, SCROLL_CHUNK_LINES);
+        assert!(msg_area.is_scrolled());
+
+        msg_area.add_text("new", SegStyle::UserMsg);
+        msg_area.flush_line();
+        assert_eq!(msg_area.scroll, SCROLL_CHUNK_LINES + 1);
+
+        msg_area.scroll_chunk_down();
+        assert_eq!(msg_area.scroll, 1);
+        msg_area.scroll_chunk_down();
+        assert_eq!(msg_area.scroll, 0);
+        assert!(!msg_area.is_scrolled());
+
+        msg_area.add_text("live", SegStyle::UserMsg);
+        msg_area.flush_line();
+        assert_eq!(msg_area.scroll, 0);
     }
 
     #[test]
