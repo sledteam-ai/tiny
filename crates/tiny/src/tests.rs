@@ -336,7 +336,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                     }),
                     cmd: Cmd::PRIVMSG {
                         target: MsgTarget::User("osa1".to_owned()),
-                        msg: r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"trail":{"name":"North"}}}"#.to_owned(),
+                        msg: r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"North"},"spans":[]}}"#.to_owned(),
                         is_notice: false,
                         ctcp: None,
                     },
@@ -360,7 +360,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 DEFAULT_TUI_WIDTH,
                 DEFAULT_TUI_HEIGHT,
             );
-            assert!(output.contains("name: North"));
+            assert!(output.contains("└── North"), "{output:?}");
             assert!(matches!(
                 rcv_tui_ev.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)

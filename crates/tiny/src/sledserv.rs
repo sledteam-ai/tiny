@@ -108,10 +108,142 @@ fn format_response(response: Response) -> Vec<String> {
         )],
         Outcome::Ok { data: None } => vec![format!("Sledteam {}: ok", response.command)],
         Outcome::Ok { data: Some(data) } => {
+            if let Some(lines) = format_travel_tree(&response.command, &data) {
+                return lines;
+            }
             let mut lines = vec![format!("Sledteam {}:", response.command)];
             format_value(&data, 0, &mut lines);
             lines
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct NamedResource {
+    ulid: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct CurrentPosition {
+    expedition_id: String,
+    trail_id: String,
+}
+
+#[derive(Deserialize)]
+struct EtsData {
+    expedition: Option<NamedResource>,
+    trail: Option<NamedResource>,
+    spans: Option<Vec<NamedResource>>,
+}
+
+#[derive(Deserialize)]
+struct ExpeditionListData {
+    current: Option<CurrentPosition>,
+    expeditions: Vec<NamedResource>,
+}
+
+#[derive(Deserialize)]
+struct TrailListData {
+    current: Option<CurrentPosition>,
+    expedition: NamedResource,
+    trails: Vec<NamedResource>,
+}
+
+#[derive(Deserialize)]
+struct SpanListData {
+    trail: NamedResource,
+    spans: Vec<NamedResource>,
+}
+
+fn format_travel_tree(command: &str, data: &Value) -> Option<Vec<String>> {
+    match command {
+        "travel.ets" => {
+            let data: EtsData = serde_yaml::from_value(data.clone()).ok()?;
+            let Some(expedition) = data.expedition else {
+                return Some(vec!["(none)".to_owned()]);
+            };
+            let mut lines = vec![expedition.name];
+            if let Some(trail) = data.trail {
+                lines.push(format!("└── {}", trail.name));
+                append_children(&mut lines, "    ", data.spans.unwrap_or_default(), None);
+            }
+            Some(lines)
+        }
+        "travel.expedition.list" => {
+            let data: ExpeditionListData = serde_yaml::from_value(data.clone()).ok()?;
+            let current = data
+                .current
+                .as_ref()
+                .map(|current| current.expedition_id.as_str());
+            Some(top_level_list(data.expeditions, current))
+        }
+        "travel.trail.list" => {
+            let data: TrailListData = serde_yaml::from_value(data.clone()).ok()?;
+            let current = data
+                .current
+                .as_ref()
+                .map(|current| current.trail_id.as_str());
+            let mut lines = vec![format!("└── {}", data.expedition.name)];
+            append_children(&mut lines, "    ", data.trails, current);
+            Some(lines)
+        }
+        "travel.span.list" => {
+            let data: SpanListData = serde_yaml::from_value(data.clone()).ok()?;
+            let mut lines = vec![format!("└── {}", data.trail.name)];
+            append_children(&mut lines, "    ", data.spans, None);
+            Some(lines)
+        }
+        _ => None,
+    }
+}
+
+fn top_level_list(resources: Vec<NamedResource>, current: Option<&str>) -> Vec<String> {
+    if resources.is_empty() {
+        return vec!["(none)".to_owned()];
+    }
+    let last = resources.len() - 1;
+    resources
+        .into_iter()
+        .enumerate()
+        .map(|(idx, resource)| {
+            let branch = if idx == last {
+                "└──"
+            } else {
+                "├──"
+            };
+            format!("{branch} {}", active_name(&resource, current))
+        })
+        .collect()
+}
+
+fn append_children(
+    lines: &mut Vec<String>,
+    indent: &str,
+    resources: Vec<NamedResource>,
+    current: Option<&str>,
+) {
+    let Some(last) = resources.len().checked_sub(1) else {
+        return;
+    };
+    for (idx, resource) in resources.into_iter().enumerate() {
+        let branch = if idx == last {
+            "└──"
+        } else {
+            "├──"
+        };
+        lines.push(format!(
+            "{indent}{branch} {}",
+            active_name(&resource, current)
+        ));
+    }
+}
+
+fn active_name(resource: &NamedResource, current: Option<&str>) -> String {
+    if current == Some(resource.ulid.as_str()) {
+        format!("\u{2}{}\u{2}", resource.name)
+    } else {
+        resource.name.clone()
     }
 }
 
@@ -170,6 +302,13 @@ mod tests {
         }
     }
 
+    fn ok_response(command: &str, data: &str) -> Response {
+        serde_yaml::from_str(&format!(
+            r#"{{"schema_version":1,"command":"{command}","status":"ok","data":{data}}}"#
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn matches_out_of_order_responses_by_command() {
         let pending = PendingRequests::default();
@@ -180,15 +319,12 @@ mod tests {
             .consume(
                 "irc",
                 "sledserv",
-                r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"trail":{"name":"North"}}}"#,
+                r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"North"},"spans":[]}}"#,
             )
             .unwrap();
 
         assert_eq!(response.origin, channel("irc", "#second"));
-        assert_eq!(
-            response.lines,
-            ["Sledteam travel.ets:", "trail:", "  name: North"]
-        );
+        assert_eq!(response.lines, ["Moonshot", "└── North"]);
         assert_eq!(pending.origins(), [channel("irc", "#first")]);
     }
 
@@ -210,5 +346,81 @@ mod tests {
                 .is_none()
         );
         assert_eq!(pending.origins(), [origin]);
+    }
+
+    #[test]
+    fn ets_tree_handles_zero_one_and_multiple_spans() {
+        let zero = format_response(ok_response(
+            "travel.ets",
+            r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[]}"#,
+        ));
+        assert_eq!(zero, ["Moonshot", "└── irc"]);
+
+        let one = format_response(ok_response(
+            "travel.ets",
+            r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"}]}"#,
+        ));
+        assert_eq!(one, ["Moonshot", "└── irc", "    └── ux"]);
+
+        let many = format_response(ok_response(
+            "travel.ets",
+            r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"},{"ulid":"S2","name":"multiline"}]}"#,
+        ));
+        assert_eq!(
+            many,
+            ["Moonshot", "└── irc", "    ├── ux", "    └── multiline"]
+        );
+    }
+
+    #[test]
+    fn expedition_tree_marks_current_ulid_and_handles_no_current() {
+        let data = r#"{"current":{"expedition_id":"E2","trail_id":"T9"},"expeditions":[{"ulid":"E1","name":"Moonshot","project_root":"/secret","kind":"standard"},{"ulid":"E2","name":"Another Expedition"}]}"#;
+        assert_eq!(
+            format_response(ok_response("travel.expedition.list", data)),
+            ["├── Moonshot", "└── \u{2}Another Expedition\u{2}"]
+        );
+
+        let data = r#"{"current":null,"expeditions":[{"ulid":"E1","name":"Moonshot"}]}"#;
+        assert_eq!(
+            format_response(ok_response("travel.expedition.list", data)),
+            ["└── Moonshot"]
+        );
+    }
+
+    #[test]
+    fn trail_tree_only_marks_an_exact_current_ulid() {
+        let data = r#"{"current":{"expedition_id":"OTHER","trail_id":"T9"},"expedition":{"ulid":"E1","name":"Moonshot"},"trails":[{"ulid":"T1","name":"planning"},{"ulid":"T2","name":"irc"}]}"#;
+        assert_eq!(
+            format_response(ok_response("travel.trail.list", data)),
+            ["└── Moonshot", "    ├── planning", "    └── irc"]
+        );
+
+        let data = r#"{"current":{"expedition_id":"E1","trail_id":"T2"},"expedition":{"ulid":"E1","name":"Moonshot"},"trails":[{"ulid":"T1","name":"planning"},{"ulid":"T2","name":"irc"}]}"#;
+        assert_eq!(
+            format_response(ok_response("travel.trail.list", data)),
+            ["└── Moonshot", "    ├── planning", "    └── \u{2}irc\u{2}"]
+        );
+    }
+
+    #[test]
+    fn span_tree_omits_expedition_and_active_styling() {
+        let data = r#"{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"irc"},"spans":[{"ulid":"S1","name":"ux"},{"ulid":"S2","name":"multiline"}]}"#;
+        let lines = format_response(ok_response("travel.span.list", data));
+        assert_eq!(lines, ["└── irc", "    ├── ux", "    └── multiline"]);
+        let rendered = lines.join("");
+        assert!(!rendered.contains('\u{2}'));
+        assert!(!rendered.contains("Moonshot"));
+        assert!(!rendered.contains("S1"));
+    }
+
+    #[test]
+    fn unsupported_success_response_keeps_structured_fallback() {
+        assert_eq!(
+            format_response(ok_response(
+                "travel.expedition.add",
+                r#"{"name":"Moonshot"}"#
+            )),
+            ["Sledteam travel.expedition.add:", "name: Moonshot"]
+        );
     }
 }
