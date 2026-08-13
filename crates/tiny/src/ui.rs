@@ -131,14 +131,68 @@ fn handle_input_ev(
         }
 
         Lines { lines, source } => {
-            for line in lines.into_iter() {
-                send_msg(ui, clients, &source, line, false)
-            }
+            send_lines(ui, clients, &source, lines);
         }
 
         Cmd { cmd, source } => {
             run_cmd(&cmd, source, defaults, ui, clients);
         }
+    }
+}
+
+fn send_lines(ui: &UI, clients: &mut [Client], src: &MsgSource, lines: Vec<String>) {
+    if lines.is_empty() {
+        return;
+    }
+
+    if src.serv_name() == "mentions" || matches!(src, MsgSource::Serv { .. }) {
+        for line in lines {
+            send_msg(ui, clients, src, line, false);
+        }
+        return;
+    }
+
+    let client = clients
+        .iter_mut()
+        .find(|client| client.get_serv_name() == src.serv_name())
+        .unwrap();
+    let (ui_target, msg_target): (MsgTarget, &str) = match src {
+        MsgSource::Chan { serv, chan } => (MsgTarget::Chan { serv, chan }, chan.display()),
+        MsgSource::User { serv, nick } => {
+            let ui_target =
+                if nick.eq_ignore_ascii_case("nickserv") || nick.eq_ignore_ascii_case("chanserv") {
+                    MsgTarget::Server { serv }
+                } else {
+                    MsgTarget::User { serv, nick }
+                };
+            (ui_target, nick)
+        }
+        MsgSource::Serv { .. } => unreachable!(),
+    };
+
+    if client.multiline_privmsg(msg_target, &lines) {
+        let ts = time::now();
+        let nick = client.get_nick();
+        for line in &lines {
+            ui.add_privmsg(&nick, line, ts, &ui_target, false, false);
+        }
+        return;
+    }
+
+    // Preserve Tiny's pre-multiline fallback, including its representation of
+    // editor blank lines as a single-space PRIVMSG.
+    for line in lines {
+        send_msg(
+            ui,
+            clients,
+            src,
+            if line.is_empty() {
+                " ".to_owned()
+            } else {
+                line
+            },
+            false,
+        );
     }
 }
 

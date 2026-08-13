@@ -225,6 +225,21 @@ impl Client {
             .unwrap();
     }
 
+    /// Send multiple composed lines as one IRCv3 multiline message when both
+    /// required capabilities were negotiated. Returns whether a batch was sent.
+    pub fn multiline_privmsg(&mut self, target: &str, lines: &[String]) -> bool {
+        let Some((max_bytes, max_lines)) = self.state.multiline_limits() else {
+            return false;
+        };
+        let reference = self.state.next_batch_reference();
+        let Some(msg) = wire::multiline_privmsg(target, lines, &reference, max_bytes, max_lines)
+        else {
+            return false;
+        };
+        self.msg_chan.try_send(Cmd::Msg(msg)).unwrap();
+        true
+    }
+
     /// Join the given list of channels.
     pub fn join<'a, I>(&mut self, chans: I)
     where
@@ -441,13 +456,10 @@ async fn main_loop(
 
         // Reset the connection state
         irc_state.reset();
-        // Introduce self
-        if server_info.sasl_auth.is_some() {
-            // Will introduce self after getting a response to this LS command.
-            // This is to avoid getting stuck during nick registration. See the
-            // discussion in #91.
-            snd_msg.try_send(wire::cap_ls()).unwrap();
-        } else {
+        // Start IRCv3 capability negotiation on every connection. Without SASL,
+        // registration can proceed in parallel with CAP negotiation.
+        snd_msg.try_send(wire::cap_ls()).unwrap();
+        if server_info.sasl_auth.is_none() {
             irc_state.introduce(&mut snd_msg);
         }
 
@@ -693,5 +705,108 @@ async fn try_connect<S: StreamExt<Item = Cmd> + Unpin>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod client_send_tests {
+    use super::*;
+
+    fn server_info() -> ServerInfo {
+        ServerInfo {
+            addr: "irc.example".to_owned(),
+            port: 6667,
+            tls: false,
+            pass: None,
+            user: None,
+            realname: "Tiny User".to_owned(),
+            nicks: vec!["tiny".to_owned()],
+            auto_join: Vec::new(),
+            nickserv_ident: None,
+            sasl_auth: None,
+        }
+    }
+
+    fn test_client() -> (Client, mpsc::Receiver<Cmd>) {
+        let (msg_chan, rcv_cmd) = mpsc::channel(10);
+        (
+            Client {
+                msg_chan,
+                serv_name: "irc.example".to_owned(),
+                state: State::new(server_info()),
+            },
+            rcv_cmd,
+        )
+    }
+
+    fn negotiate_multiline(client: &Client) {
+        let (mut snd_ev, _rcv_ev) = mpsc::channel(10);
+        let (mut snd_wire, mut rcv_wire) = mpsc::channel(10);
+        let mut ls = wire::Msg {
+            pfx: None,
+            cmd: wire::Cmd::CAP {
+                client: "*".to_owned(),
+                subcommand: "LS".to_owned(),
+                continuation: false,
+                params: vec![
+                    "batch".to_owned(),
+                    "draft/multiline=max-bytes=16384,max-lines=64".to_owned(),
+                ],
+            },
+        };
+        client.state.update(&mut ls, &mut snd_ev, &mut snd_wire);
+        while rcv_wire.try_recv().is_ok() {}
+
+        let mut ack = wire::Msg {
+            pfx: None,
+            cmd: wire::Cmd::CAP {
+                client: "*".to_owned(),
+                subcommand: "ACK".to_owned(),
+                continuation: false,
+                params: vec!["batch".to_owned(), "draft/multiline".to_owned()],
+            },
+        };
+        client.state.update(&mut ack, &mut snd_ev, &mut snd_wire);
+    }
+
+    #[test]
+    fn client_emits_exact_multiline_batches_with_unique_references() {
+        let (mut client, mut rcv_cmd) = test_client();
+        negotiate_multiline(&client);
+
+        let lines = vec!["first".to_owned(), "second".to_owned()];
+        assert!(client.multiline_privmsg("#tiny", &lines));
+        assert!(client.multiline_privmsg("#tiny", &lines));
+
+        let first = rcv_cmd.try_recv().unwrap();
+        let second = rcv_cmd.try_recv().unwrap();
+        assert!(matches!(
+            first,
+            Cmd::Msg(ref wire) if wire == concat!(
+                "BATCH +tiny-1 draft/multiline #tiny\r\n",
+                "@batch=tiny-1 PRIVMSG #tiny :first\r\n",
+                "@batch=tiny-1 PRIVMSG #tiny :second\r\n",
+                "BATCH -tiny-1\r\n",
+            )
+        ));
+        assert!(matches!(
+            second,
+            Cmd::Msg(ref wire) if wire.starts_with("BATCH +tiny-2 draft/multiline #tiny\r\n")
+                && wire.ends_with("BATCH -tiny-2\r\n")
+        ));
+    }
+
+    #[test]
+    fn unsupported_multiline_falls_back_and_single_line_path_is_unchanged() {
+        let (mut client, mut rcv_cmd) = test_client();
+        let lines = vec!["first".to_owned(), "second".to_owned()];
+        assert!(!client.multiline_privmsg("#tiny", &lines));
+        assert!(rcv_cmd.try_recv().is_err());
+
+        client.privmsg("#tiny", "ordinary", false);
+        assert!(matches!(
+            rcv_cmd.try_recv().unwrap(),
+            Cmd::Msg(ref wire) if wire == "PRIVMSG #tiny :ordinary\r\n"
+        ));
     }
 }

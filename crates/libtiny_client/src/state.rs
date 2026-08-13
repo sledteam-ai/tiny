@@ -62,6 +62,14 @@ impl State {
         self.inner.borrow().usermask.clone()
     }
 
+    pub(crate) fn multiline_limits(&self) -> Option<(usize, usize)> {
+        self.inner.borrow().multiline_limits()
+    }
+
+    pub(crate) fn next_batch_reference(&self) -> String {
+        self.inner.borrow_mut().next_batch_reference()
+    }
+
     pub(crate) fn set_away(&self, msg: Option<&str>) {
         self.inner.borrow_mut().away_status = msg.map(str::to_owned);
     }
@@ -128,6 +136,16 @@ struct StateInner {
 
     /// Server information
     server_info: ServerInfo,
+
+    /// Connection-scoped IRCv3 capability negotiation state.
+    cap_ls: Vec<String>,
+    advertised_multiline_limits: Option<(usize, usize)>,
+    batch_negotiated: bool,
+    multiline_negotiated: bool,
+    introduced: bool,
+
+    /// Monotonically increasing on this client, including across reconnects.
+    next_batch_reference: u64,
 }
 
 #[derive(Debug)]
@@ -224,6 +242,12 @@ impl StateInner {
             servername: None,
             usermask: None,
             nick_accepted: false,
+            cap_ls: Vec::new(),
+            advertised_multiline_limits: None,
+            batch_negotiated: false,
+            multiline_negotiated: false,
+            introduced: false,
+            next_batch_reference: 1,
             server_info,
         }
     }
@@ -239,6 +263,11 @@ impl StateInner {
         }
         self.servername = None;
         self.usermask = None;
+        self.cap_ls.clear();
+        self.advertised_multiline_limits = None;
+        self.batch_negotiated = false;
+        self.multiline_negotiated = false;
+        self.introduced = false;
     }
 
     fn send_ping(&mut self, snd_irc_msg: &mut Sender<String>) {
@@ -248,6 +277,10 @@ impl StateInner {
     }
 
     fn introduce(&mut self, snd_irc_msg: &mut Sender<String>) {
+        if self.introduced {
+            return;
+        }
+        self.introduced = true;
         if let Some(ref pass) = self.server_info.pass {
             snd_irc_msg.try_send(wire::pass(pass)).unwrap();
         }
@@ -258,6 +291,20 @@ impl StateInner {
         snd_irc_msg
             .try_send(wire::user(user, &self.server_info.realname))
             .unwrap();
+    }
+
+    fn multiline_limits(&self) -> Option<(usize, usize)> {
+        if self.batch_negotiated && self.multiline_negotiated {
+            self.advertised_multiline_limits
+        } else {
+            None
+        }
+    }
+
+    fn next_batch_reference(&mut self) -> String {
+        let reference = format!("tiny-{}", self.next_batch_reference);
+        self.next_batch_reference = self.next_batch_reference.wrapping_add(1).max(1);
+        reference
     }
 
     fn get_next_nick(&mut self) -> &str {
@@ -621,35 +668,83 @@ impl StateInner {
             CAP {
                 client: _,
                 subcommand,
+                continuation,
                 params,
-            } => {
-                match subcommand.as_ref() {
-                    "ACK" => {
-                        if params.iter().any(|cap| cap.as_str() == "sasl") {
-                            if let Some(sasl) = &self.server_info.sasl_auth {
-                                let msg = match sasl {
-                                    SASLAuth::Plain { .. } => "PLAIN",
-                                    SASLAuth::External { .. } => "EXTERNAL",
-                                };
-                                snd_irc_msg.try_send(wire::authenticate(msg)).unwrap();
-                            } else {
-                                warn!("SASL AUTH not set but got SASL ACK");
-                            }
+            } => match subcommand.as_ref() {
+                "ACK" => {
+                    for cap in params.iter() {
+                        match cap_name(cap) {
+                            "batch" => self.batch_negotiated = true,
+                            "draft/multiline" => self.multiline_negotiated = true,
+                            _ => {}
                         }
                     }
-                    "NAK" => {
+                    if params.iter().any(|cap| cap_name(cap) == "sasl") {
+                        if let Some(sasl) = &self.server_info.sasl_auth {
+                            let msg = match sasl {
+                                SASLAuth::Plain { .. } => "PLAIN",
+                                SASLAuth::External { .. } => "EXTERNAL",
+                            };
+                            snd_irc_msg.try_send(wire::authenticate(msg)).unwrap();
+                        } else {
+                            warn!("SASL AUTH not set but got SASL ACK");
+                            snd_irc_msg.try_send(wire::cap_end()).unwrap();
+                        }
+                    } else {
                         snd_irc_msg.try_send(wire::cap_end()).unwrap();
                     }
-                    "LS" => {
-                        self.introduce(snd_irc_msg);
-                        if params.iter().any(|cap| cap == "sasl") {
-                            snd_irc_msg.try_send(wire::cap_req(&["sasl"])).unwrap();
-                            // Will wait for CAP ... ACK from server before authentication.
+                }
+                "NAK" => {
+                    for cap in params.iter() {
+                        match cap_name(cap) {
+                            "batch" => self.batch_negotiated = false,
+                            "draft/multiline" => self.multiline_negotiated = false,
+                            _ => {}
                         }
                     }
-                    _ => {}
+                    snd_irc_msg.try_send(wire::cap_end()).unwrap();
                 }
-            }
+                "LS" => {
+                    self.cap_ls.extend(params.iter().cloned());
+                    if *continuation {
+                        return;
+                    }
+
+                    self.introduce(snd_irc_msg);
+                    self.advertised_multiline_limits = self
+                        .cap_ls
+                        .iter()
+                        .find_map(|cap| parse_multiline_limits(cap));
+
+                    let has_cap = |name| self.cap_ls.iter().any(|cap| cap_name(cap) == name);
+                    let mut requested = Vec::new();
+                    if has_cap("batch") {
+                        requested.push("batch");
+                    }
+                    if self.advertised_multiline_limits.is_some() {
+                        requested.push("draft/multiline");
+                    }
+                    if self.server_info.sasl_auth.is_some() && has_cap("sasl") {
+                        requested.push("sasl");
+                    }
+
+                    if requested.is_empty() {
+                        snd_irc_msg.try_send(wire::cap_end()).unwrap();
+                    } else {
+                        snd_irc_msg.try_send(wire::cap_req(&requested)).unwrap();
+                    }
+                }
+                "DEL" => {
+                    for cap in params.iter() {
+                        match cap_name(cap) {
+                            "batch" => self.batch_negotiated = false,
+                            "draft/multiline" => self.multiline_negotiated = false,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            },
 
             // https://ircv3.net/specs/extensions/sasl-3.1.html
             AUTHENTICATE { param } => {
@@ -783,11 +878,133 @@ fn parse_server_pfx(pfx: Option<&Pfx>) -> Option<String> {
     }
 }
 
+fn cap_name(cap: &str) -> &str {
+    cap.trim_start_matches(['-', '~', '='])
+        .split_once('=')
+        .map_or(cap.trim_start_matches(['-', '~', '=']), |(name, _)| name)
+}
+
+fn parse_multiline_limits(cap: &str) -> Option<(usize, usize)> {
+    let value = cap.strip_prefix("draft/multiline=")?;
+    let mut max_bytes = None;
+    let mut max_lines = usize::MAX;
+    for token in value.split(',') {
+        if let Some(value) = token.strip_prefix("max-bytes=") {
+            max_bytes = value.parse::<usize>().ok().filter(|limit| *limit > 0);
+        } else if let Some(value) = token.strip_prefix("max-lines=") {
+            max_lines = value.parse::<usize>().ok().filter(|limit| *limit > 0)?;
+        }
+    }
+    Some((max_bytes?, max_lines))
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn server_info() -> ServerInfo {
+        ServerInfo {
+            addr: "irc.example".to_owned(),
+            port: 6667,
+            tls: false,
+            pass: None,
+            user: None,
+            realname: "Tiny User".to_owned(),
+            nicks: vec!["tiny".to_owned()],
+            auto_join: Vec::new(),
+            nickserv_ident: None,
+            sasl_auth: None,
+        }
+    }
+
+    fn cap(subcommand: &str, continuation: bool, params: &[&str]) -> Msg {
+        Msg {
+            pfx: Some(Pfx::Server("irc.example".to_owned())),
+            cmd: wire::Cmd::CAP {
+                client: "*".to_owned(),
+                subcommand: subcommand.to_owned(),
+                continuation,
+                params: params.iter().map(|param| (*param).to_owned()).collect(),
+            },
+        }
+    }
+
+    fn update_and_drain(state: &State, mut msg: Msg) -> Vec<String> {
+        let (mut snd_ev, _rcv_ev) = tokio::sync::mpsc::channel(10);
+        let (mut snd_wire, mut rcv_wire) = tokio::sync::mpsc::channel(10);
+        state.update(&mut msg, &mut snd_ev, &mut snd_wire);
+        let mut messages = Vec::new();
+        while let Ok(message) = rcv_wire.try_recv() {
+            messages.push(message);
+        }
+        messages
+    }
+
+    #[test]
+    fn cap_ls_req_ack_negotiates_multiline_and_ends() {
+        let state = State::new(server_info());
+        assert!(update_and_drain(&state, cap("LS", true, &["batch"])).is_empty());
+        assert_eq!(
+            update_and_drain(
+                &state,
+                cap(
+                    "LS",
+                    false,
+                    &["draft/multiline=max-bytes=16384,max-lines=64"],
+                ),
+            ),
+            vec![
+                "NICK tiny\r\n".to_owned(),
+                "USER tiny 8 * :Tiny User\r\n".to_owned(),
+                "CAP REQ :batch draft/multiline\r\n".to_owned(),
+            ]
+        );
+        assert_eq!(state.multiline_limits(), None);
+
+        assert_eq!(
+            update_and_drain(&state, cap("ACK", false, &["batch", "draft/multiline"])),
+            vec!["CAP END\r\n".to_owned()]
+        );
+        assert_eq!(state.multiline_limits(), Some((16384, 64)));
+    }
+
+    #[test]
+    fn unsupported_and_nak_leave_multiline_disabled() {
+        let unsupported = State::new(server_info());
+        assert_eq!(
+            update_and_drain(&unsupported, cap("LS", false, &[])),
+            vec![
+                "NICK tiny\r\n".to_owned(),
+                "USER tiny 8 * :Tiny User\r\n".to_owned(),
+                "CAP END\r\n".to_owned(),
+            ]
+        );
+        assert_eq!(unsupported.multiline_limits(), None);
+
+        let nak = State::new(server_info());
+        update_and_drain(
+            &nak,
+            cap(
+                "LS",
+                false,
+                &["batch", "draft/multiline=max-bytes=16384,max-lines=64"],
+            ),
+        );
+        assert_eq!(
+            update_and_drain(&nak, cap("NAK", false, &["batch", "draft/multiline"])),
+            vec!["CAP END\r\n".to_owned()]
+        );
+        assert_eq!(nak.multiline_limits(), None);
+    }
+
+    #[test]
+    fn batch_references_are_valid_and_unique() {
+        let state = State::new(server_info());
+        assert_eq!(state.next_batch_reference(), "tiny-1");
+        assert_eq!(state.next_batch_reference(), "tiny-2");
+    }
 
     #[test]
     fn test_parse_servername_1() {

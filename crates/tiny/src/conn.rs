@@ -448,6 +448,7 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
         CAP {
             client: _,
             subcommand,
+            continuation: _,
             params,
         } => match subcommand.as_ref() {
             "NAK" => {

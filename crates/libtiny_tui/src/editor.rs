@@ -175,13 +175,10 @@ pub(crate) fn run(
         let mut filtered_lines = vec![];
         for s in file_contents.lines() {
             // Ignore if the char is '#'. To actually send a `#` add space.
-            // For empty lines, send " ".
             let first_char = s.chars().next();
             if first_char == Some('#') {
                 // skip this line
                 continue;
-            } else if s.is_empty() {
-                filtered_lines.push(" ".to_owned());
             } else {
                 filtered_lines.push(s.to_owned());
             }

@@ -75,7 +75,7 @@ pub fn away(msg: Option<&str>) -> String {
 }
 
 pub fn cap_ls() -> String {
-    "CAP LS\r\n".to_string()
+    "CAP LS 302\r\n".to_string()
 }
 
 pub fn cap_req(cap_identifiers: &[&str]) -> String {
@@ -88,6 +88,97 @@ pub fn cap_end() -> String {
 
 pub fn authenticate(msg: &str) -> String {
     format!("AUTHENTICATE {msg}\r\n")
+}
+
+/// Build one client-initiated IRCv3 `draft/multiline` batch.
+///
+/// Returns `None` when the logical message cannot be represented within the
+/// server's advertised reconstructed byte/fragment limits or IRC's 512-byte
+/// wire-line limit.
+pub fn multiline_privmsg(
+    msgtarget: &str,
+    lines: &[String],
+    reference: &str,
+    max_bytes: usize,
+    max_lines: usize,
+) -> Option<String> {
+    if lines.len() < 2
+        || lines.iter().all(String::is_empty)
+        || lines.iter().any(|line| line.contains(['\r', '\n']))
+        || !reference
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return None;
+    }
+
+    let reconstructed_bytes = lines
+        .iter()
+        .try_fold(lines.len() - 1, |len, line| len.checked_add(line.len()))?;
+    if reconstructed_bytes > max_bytes {
+        return None;
+    }
+
+    let opening = format!("BATCH +{reference} draft/multiline {msgtarget}\r\n");
+    let closing = format!("BATCH -{reference}\r\n");
+    if opening.len() > 512 || closing.len() > 512 {
+        return None;
+    }
+
+    let plain_prefix = format!("@batch={reference} PRIVMSG {msgtarget} :");
+    let concat_prefix = format!("@batch={reference};draft/multiline-concat PRIVMSG {msgtarget} :");
+    let plain_capacity = 512usize.checked_sub(plain_prefix.len() + 2)?;
+    let concat_capacity = 512usize.checked_sub(concat_prefix.len() + 2)?;
+    if plain_capacity == 0 || concat_capacity == 0 {
+        return None;
+    }
+
+    let mut fragments = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            fragments.push((false, ""));
+            continue;
+        }
+
+        let mut remaining = line.as_str();
+        let mut concat = false;
+        while !remaining.is_empty() {
+            let capacity = if concat {
+                concat_capacity
+            } else {
+                plain_capacity
+            };
+            let mut split_at = remaining.len().min(capacity);
+            while !remaining.is_char_boundary(split_at) {
+                split_at -= 1;
+            }
+            if split_at == 0 {
+                return None;
+            }
+            let (fragment, rest) = remaining.split_at(split_at);
+            fragments.push((concat, fragment));
+            remaining = rest;
+            concat = true;
+        }
+    }
+
+    if fragments.len() > max_lines {
+        return None;
+    }
+
+    let mut wire = opening;
+    for (concat, fragment) in fragments {
+        let prefix = if concat {
+            &concat_prefix
+        } else {
+            &plain_prefix
+        };
+        wire.push_str(prefix);
+        wire.push_str(fragment);
+        wire.push_str("\r\n");
+    }
+    wire.push_str(&closing);
+    Some(wire)
 }
 
 /// Sender of a message ("prefix" in the RFC). Instead of returning a `String` we parse prefix part
@@ -278,6 +369,8 @@ pub enum Cmd {
     CAP {
         client: String,
         subcommand: String,
+        /// Whether this is a continued CAP 302 LS/LIST response.
+        continuation: bool,
         params: Vec<String>,
     },
 
@@ -438,11 +531,24 @@ fn parse_one_message(mut msg: &str) -> Result<Msg, String> {
             chan: ChanName::new(params[0].to_owned()),
             topic: params[1].to_owned(),
         },
-        MsgType::Cmd("CAP") if params.len() == 3 => Cmd::CAP {
-            client: params[0].to_owned(),
-            subcommand: params[1].to_owned(),
-            params: params[2].split(' ').map(|s| s.to_owned()).collect(),
-        },
+        MsgType::Cmd("CAP") if params.len() >= 3 => {
+            let continuation = params.len() >= 4 && params[2] == "*";
+            let cap_params = if continuation {
+                &params[3..]
+            } else {
+                &params[2..]
+            };
+            Cmd::CAP {
+                client: params[0].to_owned(),
+                subcommand: params[1].to_owned(),
+                continuation,
+                params: cap_params
+                    .iter()
+                    .flat_map(|param| param.split(' '))
+                    .map(str::to_owned)
+                    .collect(),
+            }
+        }
         MsgType::Cmd("AUTHENTICATE") if params.len() == 1 => Cmd::AUTHENTICATE {
             param: params[0].to_owned(),
         },
@@ -865,6 +971,114 @@ mod tests {
             User {
                 nick: "IRC".to_string(),
                 user: "IRC@fe-00106.xyz.net".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn cap_302_and_single_line_privmsg_wire() {
+        assert_eq!(cap_ls(), "CAP LS 302\r\n");
+        assert_eq!(privmsg("#tiny", "hello"), "PRIVMSG #tiny :hello\r\n");
+        assert_eq!(
+            multiline_privmsg("#tiny", &["hello".to_owned()], "tiny-1", 16384, 64),
+            None
+        );
+    }
+
+    #[test]
+    fn two_line_multiline_wire_is_exact() {
+        assert_eq!(
+            multiline_privmsg(
+                "#tiny",
+                &["first line".to_owned(), "second line".to_owned()],
+                "tiny-1",
+                16384,
+                64,
+            ),
+            Some(
+                concat!(
+                    "BATCH +tiny-1 draft/multiline #tiny\r\n",
+                    "@batch=tiny-1 PRIVMSG #tiny :first line\r\n",
+                    "@batch=tiny-1 PRIVMSG #tiny :second line\r\n",
+                    "BATCH -tiny-1\r\n",
+                )
+                .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn multiline_preserves_blank_lines_exactly() {
+        assert_eq!(
+            multiline_privmsg(
+                "bob",
+                &["before".to_owned(), "".to_owned(), "after".to_owned()],
+                "tiny-2",
+                16384,
+                64,
+            ),
+            Some(
+                concat!(
+                    "BATCH +tiny-2 draft/multiline bob\r\n",
+                    "@batch=tiny-2 PRIVMSG bob :before\r\n",
+                    "@batch=tiny-2 PRIVMSG bob :\r\n",
+                    "@batch=tiny-2 PRIVMSG bob :after\r\n",
+                    "BATCH -tiny-2\r\n",
+                )
+                .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn long_logical_line_uses_concat_and_respects_wire_limit() {
+        let long_line = "é".repeat(300);
+        let wire = multiline_privmsg(
+            "#tiny",
+            &[long_line.clone(), "tail".to_owned()],
+            "tiny-3",
+            16384,
+            64,
+        )
+        .unwrap();
+
+        assert!(wire.contains("@batch=tiny-3;draft/multiline-concat PRIVMSG #tiny :"));
+        assert!(wire.split_inclusive("\r\n").all(|line| line.len() <= 512));
+
+        let fragments = wire
+            .lines()
+            .filter(|line| line.contains(" PRIVMSG "))
+            .collect::<Vec<_>>();
+        let reconstructed_first = fragments[..2]
+            .iter()
+            .map(|line| line.split_once(" :").unwrap().1)
+            .collect::<String>();
+        assert_eq!(reconstructed_first, long_line);
+    }
+
+    #[test]
+    fn multiline_enforces_reconstructed_byte_and_fragment_limits() {
+        let lines = vec!["1234".to_owned(), "5678".to_owned()];
+        assert!(multiline_privmsg("#tiny", &lines, "tiny-4", 9, 2).is_some());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny-4", 8, 2).is_none());
+
+        let long_line = "x".repeat(900);
+        let lines = vec![long_line, "tail".to_owned()];
+        assert!(multiline_privmsg("#tiny", &lines, "tiny-5", 16384, 3).is_some());
+        assert!(multiline_privmsg("#tiny", &lines, "tiny-5", 16384, 2).is_none());
+        assert!(multiline_privmsg("#tiny", &lines, "bad_ref", 16384, 64).is_none());
+    }
+
+    #[test]
+    fn cap_302_continuation_is_parsed() {
+        let mut buf = b":server CAP * LS * :batch\r\n".to_vec();
+        assert_eq!(
+            parse_irc_msg(&mut buf).unwrap().unwrap().cmd,
+            Cmd::CAP {
+                client: "*".to_owned(),
+                subcommand: "LS".to_owned(),
+                continuation: true,
+                params: vec!["batch".to_owned()],
             }
         );
     }
