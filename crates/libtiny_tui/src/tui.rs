@@ -13,7 +13,6 @@ use std::str::{self, SplitWhitespace};
 use time::Tm;
 
 use crate::config::{Colors, Config, TabConfig, TabConfigs, parse_config};
-use crate::editor;
 use crate::key_map::{KeyAction, KeyMap};
 use crate::messaging::{MessagingUI, Timestamp};
 use crate::msg_area::Layout;
@@ -34,6 +33,9 @@ pub(crate) enum TUIRet {
 
     /// A message was sent. `msg` will have at least one character.
     Input { msg: Vec<char>, from: MsgSource },
+
+    /// A multiline message was submitted from the internal composer.
+    Lines { lines: Vec<String>, from: MsgSource },
 }
 
 const LEFT_ARROW: char = '<';
@@ -116,10 +118,6 @@ impl TUI {
     /// Get termbox front buffer. Useful for testing rendering.
     pub(crate) fn get_front_buffer(&self) -> CellBuf {
         self.tb.get_front_buffer()
-    }
-
-    pub(crate) fn activate(&mut self) {
-        self.tb.activate()
     }
 
     #[cfg(test)]
@@ -557,24 +555,20 @@ impl TUI {
         self.fix_scroll_after_close();
     }
 
-    pub(crate) fn handle_input_event(
-        &mut self,
-        ev: Event,
-        rcv_editor_ret: &mut Option<editor::ResultReceiver>,
-    ) -> Option<TUIRet> {
+    pub(crate) fn handle_input_event(&mut self, ev: Event) -> Option<TUIRet> {
         match ev {
-            Event::Key(key) => self.keypressed(key, rcv_editor_ret),
+            Event::Key(key) => self.keypressed(key),
 
             Event::String(str) => {
                 // For some reason on my terminal newlines in text are
                 // translated to carriage returns when pasting so we check for
                 // both just to make sure
                 if str.contains('\n') || str.contains('\r') {
-                    self.run_editor(&str, rcv_editor_ret);
+                    self.tabs[self.active_idx].widget.open_composer(&str);
                 } else {
                     // TODO this may be too slow for pasting long single lines
                     for ch in str.chars() {
-                        self.handle_input_event(Event::Key(Key::Char(ch)), rcv_editor_ret);
+                        self.handle_input_event(Event::Key(Key::Char(ch)));
                     }
                 }
                 None
@@ -584,85 +578,7 @@ impl TUI {
         }
     }
 
-    pub(crate) fn handle_editor_result(
-        &mut self,
-        editor_ret: editor::Result<Vec<String>>,
-    ) -> Option<(Vec<String>, MsgSource)> {
-        match editor_ret {
-            Err(err) => {
-                self.handle_editor_err(err);
-                None
-            }
-            Ok(lines) => {
-                let tab = &mut self.tabs[self.active_idx].widget;
-                // If there's only one line just add it to the input field, do not send it
-                if lines.len() == 1 {
-                    tab.set_input_field(&lines[0]);
-                    None
-                } else {
-                    // Otherwise add the lines to text field history and send it
-                    for line in &lines {
-                        tab.add_input_field_history(line);
-                    }
-                    Some((lines, self.tabs[self.active_idx].src.clone()))
-                }
-            }
-        }
-    }
-
-    /// Edit current input + `str` before sending.
-    fn run_editor(&mut self, str: &str, rcv_editor_ret: &mut Option<editor::ResultReceiver>) {
-        let tab = &mut self.tabs[self.active_idx].widget;
-        let (msg, cursor) = tab.flush_input_field();
-        match editor::run(&mut self.tb, msg, cursor, str, rcv_editor_ret) {
-            Ok(()) => {}
-            Err(err) => self.handle_editor_err(err),
-        }
-    }
-
-    fn handle_editor_err(&mut self, err: editor::Error) {
-        use std::env::VarError;
-
-        let editor::Error {
-            text_field_contents,
-            cursor,
-            kind,
-        } = err;
-
-        match kind {
-            editor::ErrorKind::Io(err) => {
-                self.add_client_err_msg(
-                    &format!("Error while running $EDITOR: {err:?}"),
-                    &MsgTarget::CurrentTab,
-                );
-            }
-            editor::ErrorKind::Var(VarError::NotPresent) => {
-                self.add_client_err_msg(
-                    "Can't paste multi-line string: \
-                             make sure your $EDITOR is set",
-                    &MsgTarget::CurrentTab,
-                );
-            }
-            editor::ErrorKind::Var(VarError::NotUnicode(_)) => {
-                self.add_client_err_msg(
-                    "Can't paste multi-line string: \
-                             can't parse $EDITOR (not unicode)",
-                    &MsgTarget::CurrentTab,
-                );
-            }
-        }
-
-        // Restore text field contents
-        let tab = &mut self.tabs[self.active_idx].widget;
-        tab.set_input_field(&text_field_contents);
-        tab.set_cursor(cursor);
-    }
-
-    fn keypressed(
-        &mut self,
-        key: Key,
-        rcv_editor_ret: &mut Option<editor::ResultReceiver>,
-    ) -> Option<TUIRet> {
+    fn keypressed(&mut self, key: Key) -> Option<TUIRet> {
         let key_action = self.key_map.get(&key).or(match key {
             Key::Char(c) => Some(KeyAction::Input(c)),
             Key::AltChar(c) => Some(KeyAction::TabGoto(c)),
@@ -675,7 +591,7 @@ impl TUI {
             WidgetRet::KeyHandled => None,
 
             WidgetRet::KeyIgnored => {
-                self.handle_keypress(key_action, rcv_editor_ret);
+                self.handle_keypress(key_action);
                 None
             }
 
@@ -689,20 +605,17 @@ impl TUI {
                 from: self.tabs[self.active_idx].src.clone(),
             }),
 
+            WidgetRet::Lines(lines) => Some(TUIRet::Lines {
+                lines,
+                from: self.tabs[self.active_idx].src.clone(),
+            }),
+
             WidgetRet::Remove => unimplemented!(),
         }
     }
 
-    fn handle_keypress(
-        &mut self,
-        key_action: KeyAction,
-        rcv_editor_ret: &mut Option<editor::ResultReceiver>,
-    ) {
+    fn handle_keypress(&mut self, key_action: KeyAction) {
         match key_action {
-            KeyAction::RunEditor => {
-                self.run_editor("", rcv_editor_ret);
-            }
-
             KeyAction::TabNext => {
                 self.next_tab();
             }

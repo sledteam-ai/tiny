@@ -15,7 +15,10 @@ pub(crate) enum KeyAction {
     Disable,
     Exit,
 
-    RunEditor,
+    #[serde(alias = "run_editor")]
+    OpenComposer,
+
+    ComposerSend,
 
     TabNext,
     TabPrev,
@@ -56,7 +59,10 @@ impl Default for KeyMap {
         let map = [
             (Key::Esc, KeyAction::Cancel),
             (Key::Ctrl('c'), KeyAction::Exit),
-            (Key::Ctrl('x'), KeyAction::RunEditor),
+            (Key::Ctrl('x'), KeyAction::OpenComposer),
+            // Some terminals report Ctrl+Enter as the same line feed as Ctrl+J.
+            (Key::Ctrl('j'), KeyAction::ComposerSend),
+            (Key::CtrlEnter, KeyAction::ComposerSend),
             (Key::Ctrl('n'), KeyAction::TabNext),
             (Key::Ctrl('p'), KeyAction::TabPrev),
             (Key::AltArrow(Arrow::Left), KeyAction::TabMoveLeft),
@@ -226,7 +232,9 @@ impl<'de> Deserialize<'de> for MappedKey {
                             }
                         }
                         "ctrl" => {
-                            if let Some(arrow) = parse_arrow(k2) {
+                            if k2 == "enter" {
+                                Key::CtrlEnter
+                            } else if let Some(arrow) = parse_arrow(k2) {
                                 Key::CtrlArrow(arrow)
                             } else if let Some(f_key) = parse_f_key(k2) {
                                 Key::CtrlF(f_key)
@@ -304,7 +312,8 @@ impl Display for KeyAction {
             KeyAction::Cancel => "cancel",
             KeyAction::Disable => "disable",
             KeyAction::Exit => "exit",
-            KeyAction::RunEditor => "run_editor",
+            KeyAction::OpenComposer => "open_composer",
+            KeyAction::ComposerSend => "composer_send",
             KeyAction::TabNext => "tab_next",
             KeyAction::TabPrev => "tab_prev",
             KeyAction::TabMoveLeft => "tab_move_left",
@@ -395,6 +404,7 @@ impl Display for KeyDisplay {
             Key::Char('\r') => write!(f, "enter"),
             Key::Char(char) => write!(f, "{char}"),
             Key::Ctrl(char) => write!(f, "ctrl_{char}"),
+            Key::CtrlEnter => write!(f, "ctrl_enter"),
             Key::CtrlArrow(arrow) => write!(f, "ctrl_{}", ArrowDisplay(arrow)),
             Key::CtrlF(fkey) => write!(f, "ctrl_{}", FKeyDisplay(fkey)),
             Key::Del => write!(f, "del"),
@@ -531,7 +541,12 @@ fn deser_enter() {
     let key: MappedKey = serde_yaml::from_str("enter").unwrap();
     assert_eq!(key.0, Key::Char('\r'));
 
-    // It's not possible to parse enter with modifiers.
-    let key: Result<MappedKey, _> = serde_yaml::from_str("ctrl_enter");
-    assert!(key.is_err());
+    let key: MappedKey = serde_yaml::from_str("ctrl_enter").unwrap();
+    assert_eq!(key.0, Key::CtrlEnter);
+}
+
+#[test]
+fn old_editor_action_name_opens_composer() {
+    let action: KeyAction = serde_yaml::from_str("run_editor").unwrap();
+    assert_eq!(action, KeyAction::OpenComposer);
 }

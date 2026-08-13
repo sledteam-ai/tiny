@@ -180,7 +180,7 @@ fn send_lines(ui: &UI, clients: &mut [Client], src: &MsgSource, lines: Vec<Strin
     }
 
     // Preserve Tiny's pre-multiline fallback, including its representation of
-    // editor blank lines as a single-space PRIVMSG.
+    // composer blank lines as a single-space PRIVMSG.
     for line in lines {
         send_msg(
             ui,

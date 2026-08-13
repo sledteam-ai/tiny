@@ -1,8 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::cognitive_complexity)]
 
+mod composer;
 pub mod config;
-mod editor;
 mod exit_dialogue;
 mod input_area;
 mod key_map;
@@ -135,33 +135,7 @@ async fn input_handler<S>(
 ) where
     S: Stream<Item = std::io::Result<term_input::Event>> + Unpin,
 {
-    // See module documentation of `editor` for how editor stuff works
-    let mut rcv_editor_ret: Option<editor::ResultReceiver> = None;
-
     loop {
-        if let Some(editor_ret) = rcv_editor_ret.take() {
-            // $EDITOR running, don't read stdin, wait for $EDITOR to finish
-            match editor_ret.await {
-                Err(recv_error) => {
-                    debug!("RecvError while waiting editor response: {recv_error:?}");
-                }
-                Ok(editor_ret) => {
-                    if let Some((lines, from)) = tui.borrow_mut().handle_editor_result(editor_ret) {
-                        debug!("editor ret: {lines:?}");
-                        snd_ev
-                            .try_send(Event::Lines {
-                                lines,
-                                source: from,
-                            })
-                            .unwrap();
-                    }
-                }
-            }
-
-            tui.borrow_mut().activate();
-            tui.borrow_mut().draw();
-        }
-
         match input_stream.next().await {
             None => {
                 break;
@@ -171,7 +145,7 @@ async fn input_handler<S>(
                 break;
             }
             Some(Ok(ev)) => {
-                let tui_ret = tui.borrow_mut().handle_input_event(ev, &mut rcv_editor_ret);
+                let tui_ret = tui.borrow_mut().handle_input_event(ev);
                 match tui_ret {
                     Some(TUIRet::KeyCommand { cmd, from }) => {
                         let result = tui.borrow_mut().try_handle_cmd(&cmd, &from);
@@ -212,6 +186,15 @@ async fn input_handler<S>(
                                 })
                                 .unwrap();
                         }
+                    }
+
+                    Some(TUIRet::Lines { lines, from }) => {
+                        snd_ev
+                            .try_send(Event::Lines {
+                                lines,
+                                source: from,
+                            })
+                            .unwrap();
                     }
 
                     None => {}

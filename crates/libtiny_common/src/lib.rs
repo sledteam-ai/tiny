@@ -269,7 +269,7 @@ pub enum Event {
 
     /// A multi-line message was sent.
     ///
-    /// This can be done by pasting, or via the editor command (`C-x` by default).
+    /// This can be done by pasting, or via the composer (`C-x` by default).
     Lines {
         lines: Vec<String>,
         source: MsgSource,

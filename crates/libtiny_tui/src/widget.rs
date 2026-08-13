@@ -8,6 +8,9 @@ pub(crate) enum WidgetRet {
     /// An input is submitted.
     Input(Vec<char>),
 
+    /// A multiline input is submitted as one logical message.
+    Lines(Vec<String>),
+
     /// A command is ran.
     Command(String),
 

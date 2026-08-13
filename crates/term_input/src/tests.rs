@@ -46,3 +46,15 @@ fn test_utf8_char() {
 fn test_tab_key() {
     assert_eq!(parse_single_event("\t".as_bytes()), Event::Key(Key::Tab));
 }
+
+#[test]
+fn test_ctrl_enter_encodings() {
+    assert_eq!(
+        parse_single_event("\x1B[13;5u".as_bytes()),
+        Event::Key(Key::CtrlEnter)
+    );
+    assert_eq!(
+        parse_single_event("\x1B[27;5;13~".as_bytes()),
+        Event::Key(Key::CtrlEnter)
+    );
+}

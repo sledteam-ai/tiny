@@ -2,6 +2,7 @@ use std::panic::Location;
 
 use libtiny_common::{ChanNameRef, MsgSource, MsgTarget};
 use term_input::{Event, Key};
+use termbox_simple::TB_BOLD;
 
 use crate::test_utils::expect_screen;
 use crate::tui::TUI;
@@ -13,7 +14,7 @@ mod config;
 
 fn enter_string(tui: &mut TUI, s: &str) {
     for c in s.chars() {
-        tui.handle_input_event(Event::Key(Key::Char(c)), &mut None);
+        tui.handle_input_event(Event::Key(Key::Char(c)));
     }
 }
 
@@ -97,6 +98,121 @@ fn tab_navigation_skips_hidden_mentions_tab() {
 }
 
 #[test]
+fn composer_enter_and_ctrl_enter_submit_one_logical_message() {
+    let mut tui = TUI::new_test(30, 10);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+
+    assert!(tui.handle_input_event(Event::Key(Key::Ctrl('x'))).is_none());
+    enter_string(&mut tui, "first");
+    assert!(
+        tui.handle_input_event(Event::Key(Key::Char('\r')))
+            .is_none()
+    );
+    enter_string(&mut tui, "second");
+
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::CtrlEnter)),
+        Some(crate::tui::TUIRet::Lines { lines, .. })
+            if lines == ["first", "second"]
+    ));
+    assert!(!tui.get_tabs()[1].widget.is_composing());
+}
+
+#[test]
+fn multiline_paste_opens_bold_internal_composer() {
+    let mut tui = TUI::new_test(20, 10);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+
+    assert!(
+        tui.handle_input_event(Event::String("one\r\ntwo".to_owned()))
+            .is_none()
+    );
+    assert!(tui.get_tabs()[1].widget.is_composing());
+
+    tui.draw();
+    let buffer = tui.get_front_buffer();
+    let composer_top = 5 * 20;
+    assert_eq!(buffer.cells[composer_top].ch, '┏');
+    assert_ne!(buffer.cells[composer_top].fg & TB_BOLD, 0);
+
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Ctrl('j'))),
+        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["one", "two"]
+    ));
+}
+
+#[test]
+fn composer_scrollback_and_tab_movement_keep_composer_focus() {
+    let mut tui = TUI::new_test(24, 10);
+    let serv = "irc.example.org";
+    let first = ChanNameRef::new("#first");
+    let second = ChanNameRef::new("#second");
+    tui.new_server_tab(serv, None);
+    tui.new_chan_tab(serv, first);
+    tui.new_chan_tab(serv, second);
+    tui.next_tab();
+    tui.next_tab();
+
+    for line in 0..20 {
+        tui.add_msg(
+            &format!("line{line}"),
+            time::empty_tm(),
+            &MsgTarget::Chan { serv, chan: first },
+        );
+    }
+    tui.handle_input_event(Event::String("draft\ntext".to_owned()));
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)));
+    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 5);
+    assert!(tui.get_tabs()[2].widget.is_composing());
+
+    let source = tui.current_tab().clone();
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Right)));
+    assert_eq!(tui.current_tab(), &source);
+    assert!(tui.get_tabs()[3].widget.is_composing());
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Left)));
+    assert_eq!(tui.current_tab(), &source);
+    assert!(tui.get_tabs()[2].widget.is_composing());
+
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
+    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 0);
+    assert!(tui.get_tabs()[2].widget.is_composing());
+}
+
+#[test]
+fn single_line_send_is_unchanged() {
+    let mut tui = TUI::new_test(20, 5);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    enter_string(&mut tui, "quick riff");
+
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Char('\r'))),
+        Some(crate::tui::TUIRet::Input { msg, .. })
+            if msg.iter().collect::<String>() == "quick riff"
+    ));
+}
+
+#[test]
+fn escape_cancels_composer_and_restores_single_line_draft() {
+    let mut tui = TUI::new_test(20, 5);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    enter_string(&mut tui, "keep me");
+    tui.handle_input_event(Event::Key(Key::Ctrl('x')));
+    enter_string(&mut tui, " discarded");
+
+    assert!(tui.handle_input_event(Event::Key(Key::Esc)).is_none());
+    assert!(!tui.get_tabs()[1].widget.is_composing());
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Char('\r'))),
+        Some(crate::tui::TUIRet::Input { msg, .. })
+            if msg.iter().collect::<String>() == "keep me"
+    ));
+}
+
+#[test]
 fn hidden_mentions_tab_still_receives_messages() {
     let mut tui = TUI::new_test(20, 4);
     let target = MsgTarget::Server { serv: "mentions" };
@@ -130,7 +246,7 @@ fn alt_arrows_scroll_each_tab_independently_and_show_indicator() {
         );
     }
 
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)), &mut None);
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)));
     assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 5);
     assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 0);
 
@@ -146,14 +262,8 @@ fn alt_arrows_scroll_each_tab_independently_and_show_indicator() {
     tui.prev_tab();
     assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 6);
 
-    tui.handle_input_event(
-        Event::Key(Key::AltArrow(term_input::Arrow::Down)),
-        &mut None,
-    );
-    tui.handle_input_event(
-        Event::Key(Key::AltArrow(term_input::Arrow::Down)),
-        &mut None,
-    );
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
+    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
     assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 0);
 
     tui.add_msg("live", ts, &MsgTarget::Server { serv: first });
@@ -315,7 +425,7 @@ fn ctrl_w() {
          |irc.server_1.org #chan        |";
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
-    tui.handle_input_event(Event::Key(Key::Ctrl('w')), &mut None);
+    tui.handle_input_event(Event::Key(Key::Ctrl('w')));
     tui.draw();
 
     #[rustfmt::skip]
@@ -327,7 +437,7 @@ fn ctrl_w() {
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
     println!("~~~~~~~~~~~~~~~~~~~~~~");
-    tui.handle_input_event(Event::Key(Key::Ctrl('w')), &mut None);
+    tui.handle_input_event(Event::Key(Key::Ctrl('w')));
     println!("~~~~~~~~~~~~~~~~~~~~~~");
     tui.draw();
 
@@ -348,7 +458,7 @@ fn ctrl_w() {
 
     expect_screen(screen, &tui.get_front_buffer(), 30, 3, Location::caller());
 
-    tui.handle_input_event(Event::Key(Key::Ctrl('w')), &mut None);
+    tui.handle_input_event(Event::Key(Key::Ctrl('w')));
     tui.draw();
 
     #[rustfmt::skip]
@@ -380,11 +490,11 @@ fn test_text_field_wrap() {
 
     for _ in 0..37 {
         let event = term_input::Event::Key(Key::Char('a'));
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
     for _ in 0..5 {
         let event = term_input::Event::Key(Key::Char('b'));
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
 
     tui.draw();
@@ -426,7 +536,7 @@ fn test_text_field_wrap() {
     // the text field
     for _ in 0..6 {
         let event = term_input::Event::Key(Key::Backspace);
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
 
     tui.draw();
@@ -448,7 +558,7 @@ fn test_text_field_wrap() {
     tui.set_size(30, 8);
     for _ in 0..5 {
         let event = term_input::Event::Key(Key::Char('b'));
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
     tui.draw();
 
@@ -484,16 +594,16 @@ fn test_text_field_wrap() {
     // Wrapping on words - splits lines on whitespace
     for _ in 0..6 {
         let event = term_input::Event::Key(Key::Backspace);
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
     // InputLine cache gets invalidated after backspace, need to redraw to calculate.
     tui.draw();
     let event = term_input::Event::Key(Key::Char(' '));
-    tui.handle_input_event(event, &mut None);
+    tui.handle_input_event(event);
 
     for _ in 0..5 {
         let event = term_input::Event::Key(Key::Char('b'));
-        tui.handle_input_event(event, &mut None);
+        tui.handle_input_event(event);
     }
 
     tui.draw();

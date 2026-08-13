@@ -4,6 +4,7 @@ use std::convert::From;
 
 use time::{self, Tm};
 
+use crate::composer::Composer;
 use crate::config::Colors;
 use crate::exit_dialogue::ExitDialogue;
 use crate::input_area::InputArea;
@@ -22,6 +23,8 @@ pub(crate) struct MessagingUI {
     /// The input field. `exit_dialogue` handles the input when available.
     // Two fields (instead of an enum) to avoid borrowchk problems.
     input_field: InputArea,
+
+    composer: Option<Composer>,
 
     exit_dialogue: Option<ExitDialogue>,
 
@@ -98,6 +101,7 @@ impl MessagingUI {
         MessagingUI {
             msg_area: MsgArea::new(width, height - 1, scrollback, msg_layout),
             input_field: InputArea::new(width, get_input_field_max_height(height)),
+            composer: None,
             exit_dialogue: None,
             width,
             height,
@@ -131,9 +135,29 @@ impl MessagingUI {
                 exit_dialogue.draw(tb, colors, pos_x, self.height - 1);
             }
             None => {
-                // Draw InputArea first because it can trigger a resize of MsgArea
-                self.input_field
-                    .draw(tb, colors, pos_x, pos_y, self.height, &mut self.msg_area);
+                if let Some(composer) = &mut self.composer {
+                    let composer_height = Composer::height(self.height);
+                    self.msg_area
+                        .resize(self.width, self.height - composer_height);
+                    composer.draw(
+                        tb,
+                        colors,
+                        pos_x,
+                        pos_y + self.height - composer_height,
+                        self.width,
+                        composer_height,
+                    );
+                } else {
+                    // Draw InputArea first because it can trigger a resize of MsgArea
+                    self.input_field.draw(
+                        tb,
+                        colors,
+                        pos_x,
+                        pos_y,
+                        self.height,
+                        &mut self.msg_area,
+                    );
+                }
             }
         }
         self.msg_area.draw(tb, colors, pos_x, pos_y);
@@ -149,6 +173,56 @@ impl MessagingUI {
     }
 
     pub(crate) fn keypressed(&mut self, key_action: &KeyAction) -> WidgetRet {
+        if self.composer.is_some() {
+            return match key_action {
+                KeyAction::MessagesPageUp => {
+                    self.msg_area.page_up();
+                    WidgetRet::KeyHandled
+                }
+                KeyAction::MessagesPageDown => {
+                    self.msg_area.page_down();
+                    WidgetRet::KeyHandled
+                }
+                KeyAction::MessagesScrollUp => {
+                    self.msg_area.scroll_up();
+                    WidgetRet::KeyHandled
+                }
+                KeyAction::MessagesScrollDown => {
+                    self.msg_area.scroll_down();
+                    WidgetRet::KeyHandled
+                }
+                KeyAction::MessagesScrollChunkUp => {
+                    self.msg_area.scroll_chunk_up();
+                    WidgetRet::KeyHandled
+                }
+                KeyAction::MessagesScrollChunkDown => {
+                    self.msg_area.scroll_chunk_down();
+                    WidgetRet::KeyHandled
+                }
+                _ => {
+                    let ret = self.composer.as_mut().unwrap().keypressed(key_action);
+                    match ret {
+                        WidgetRet::Remove => {
+                            let composer = self.composer.take().unwrap();
+                            let (input, cursor) = composer.cancel();
+                            self.input_field.set(&input);
+                            self.input_field.set_cursor(cursor);
+                            WidgetRet::KeyHandled
+                        }
+                        WidgetRet::Lines(_) => {
+                            self.composer = None;
+                            self.msg_area.resize(
+                                self.width,
+                                self.height - self.input_field.get_height(self.width),
+                            );
+                            ret
+                        }
+                        _ => ret,
+                    }
+                }
+            };
+        }
+
         match key_action {
             KeyAction::Exit => {
                 self.toggle_exit_dialogue();
@@ -192,6 +266,10 @@ impl MessagingUI {
                 }
                 WidgetRet::KeyHandled
             }
+            KeyAction::OpenComposer => {
+                self.open_composer("");
+                WidgetRet::KeyHandled
+            }
             key_action => {
                 let ret = {
                     if let Some(exit_dialogue) = self.exit_dialogue.as_ref() {
@@ -217,8 +295,11 @@ impl MessagingUI {
 
         self.input_field
             .resize(width, get_input_field_max_height(height));
-        // msg_area should resize based on input_field's rendered height
-        let msg_area_height = height - self.input_field.get_height(width);
+        let input_height = self.composer.as_ref().map_or_else(
+            || self.input_field.get_height(width),
+            |_| Composer::height(height),
+        );
+        let msg_area_height = height - input_height;
         self.msg_area.resize(width, msg_area_height);
 
         // We don't show the nick in exit dialogue, so it has the full width
@@ -232,24 +313,20 @@ impl MessagingUI {
         self.msg_area.scroll_offset()
     }
 
-    /// Get contents of the input field and cursor location and clear it.
-    pub(crate) fn flush_input_field(&mut self) -> (String, i32) {
-        self.input_field.flush()
+    pub(crate) fn open_composer(&mut self, pasted: &str) {
+        if let Some(composer) = &mut self.composer {
+            composer.insert_text(pasted);
+            return;
+        }
+        let (input, cursor) = self.input_field.flush();
+        self.composer = Some(Composer::new(input, cursor, pasted));
+        self.msg_area
+            .resize(self.width, self.height - Composer::height(self.height));
     }
 
-    /// Add a line to input field history.
-    pub(crate) fn add_input_field_history(&mut self, str: &str) {
-        self.input_field.add_history(str)
-    }
-
-    /// Set input field contents.
-    pub(crate) fn set_input_field(&mut self, str: &str) {
-        self.input_field.set(str)
-    }
-
-    /// Set cursor location in the input field.
-    pub(crate) fn set_cursor(&mut self, cursor: i32) {
-        self.input_field.set_cursor(cursor);
+    #[cfg(test)]
+    pub(crate) fn is_composing(&self) -> bool {
+        self.composer.is_some()
     }
 
     fn toggle_exit_dialogue(&mut self) {

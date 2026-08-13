@@ -341,14 +341,10 @@ impl InputArea {
 
     /// Get contents of the text field and cursor location and clear it.
     pub(crate) fn flush(&mut self) -> (String, i32) {
+        self.modify();
+        self.height = None;
         let cursor = ::std::mem::replace(&mut self.cursor, 0);
         (self.buffer.drain(..).collect(), cursor)
-    }
-
-    /// Add a line to the text field history.
-    pub(crate) fn add_history(&mut self, str: &str) {
-        self.history
-            .push(InputLine::from_buffer(str.chars().collect()));
     }
 
     pub(crate) fn set(&mut self, str: &str) {

@@ -191,7 +191,7 @@ colors:
 # key_map:
     ### Defaults ###
     # ctrl_c: exit
-    # ctrl_x: run_editor
+    # ctrl_x: open_composer
 
     # alt_1:
     #     tab_goto: 1
