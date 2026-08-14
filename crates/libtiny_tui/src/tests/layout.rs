@@ -3,7 +3,7 @@ use std::panic::Location;
 use libtiny_common::{ChanNameRef, MsgTarget};
 
 use crate::msg_area::Layout;
-use crate::test_utils::expect_screen;
+use crate::test_utils::{buffer_str, expect_screen};
 use crate::tui::TUI;
 
 use super::single_line_tui;
@@ -117,6 +117,75 @@ fn setup_aligned_tui() -> (TUI, MsgTarget<'static>) {
 
 fn setup_compact_tui() -> (TUI, MsgTarget<'static>) {
     setup_tui(Layout::Compact)
+}
+
+#[test]
+fn logical_multiline_messages_render_one_header_and_exact_body_lines() {
+    let (mut tui, target) = setup_aligned_tui();
+    let ts = time::at_utc(time::Timespec::new(0, 0));
+    let first = [
+        "first line".to_owned(),
+        String::new(),
+        "```rust".to_owned(),
+        "    indented();".to_owned(),
+        "```".to_owned(),
+    ];
+    tui.add_privmsg("mushbot", &first.join("\n"), ts, &target, false, false);
+
+    let second = ["another message".to_owned(), "continued".to_owned()];
+    tui.add_privmsg("mushbot", &second.join("\n"), ts, &target, false, false);
+
+    assert_eq!(
+        tui.tab_lines_text(&target).unwrap(),
+        [
+            "00:00      mushbot:",
+            "first line",
+            "",
+            "```rust",
+            "    indented();",
+            "```",
+            "           mushbot:",
+            "another message",
+            "continued",
+        ]
+    );
+}
+
+#[test]
+fn separate_and_single_line_privmsgs_keep_the_compact_rendering() {
+    let (mut tui, target) = setup_compact_tui();
+    let ts = time::at_utc(time::Timespec::new(0, 0));
+    tui.add_privmsg("mushbot", "first", ts, &target, false, false);
+    tui.add_privmsg("mushbot", "second", ts, &target, false, false);
+
+    assert_eq!(
+        tui.tab_lines_text(&target).unwrap(),
+        ["00:00 mushbot: first", "mushbot: second"]
+    );
+}
+
+#[test]
+fn wrapped_multiline_body_does_not_gain_sender_prefixes() {
+    let mut tui = single_line_tui(24, 10);
+    let serv = "irc.server_1.org";
+    let chan = ChanNameRef::new("#chan");
+    tui.new_server_tab(serv, None);
+    tui.set_nick(serv, "osa1");
+    tui.new_chan_tab(serv, chan);
+    tui.next_tab();
+    tui.next_tab();
+
+    let target = MsgTarget::Chan { serv, chan };
+    let ts = time::at_utc(time::Timespec::new(0, 0));
+    let lines = vec![
+        "a long body line that wraps across several rows".to_owned(),
+        "tail".to_owned(),
+    ];
+    tui.add_multiline_privmsg("mushbot", &lines, ts, &target, false);
+    tui.draw();
+
+    let screen = buffer_str(&tui.get_front_buffer(), 24, 10);
+    assert_eq!(screen.matches("mushbot").count(), 1, "{screen:?}");
 }
 
 // Test all combinations of

@@ -239,6 +239,13 @@ impl TUI {
         highlight: bool,
         is_action: bool,
     ));
+    delegate!(add_multiline_privmsg(
+        sender: &str,
+        lines: &[String],
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+    ));
     delegate!(add_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));
     delegate!(remove_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));
     delegate!(rename_nick(

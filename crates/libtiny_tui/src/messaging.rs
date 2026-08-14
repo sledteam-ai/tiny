@@ -429,29 +429,17 @@ impl MessagingUI {
         let nick_col_style = SegStyle::NickColor(nick_color);
 
         // actions are /me msgs so they don't show the nick in the nick column, but in the msg
-        let layout = self.msg_area.layout();
-        let format_nick = |s: &str| -> String {
-            if let Layout::Aligned { max_nick_len, .. } = layout {
-                let mut aligned = format!("{s:>max_nick_len$.max_nick_len$}");
-                if s.len() > max_nick_len {
-                    aligned.pop();
-                    aligned.push('…');
-                }
-                aligned
-            } else {
-                s.to_string()
-            }
-        };
         if is_action {
-            self.msg_area
-                .add_text(&format_nick("**"), SegStyle::UserMsg);
+            let formatted_action = self.format_nick("**");
+            self.msg_area.add_text(&formatted_action, SegStyle::UserMsg);
             // separator between nick and msg
             self.msg_area.add_text("  ", SegStyle::Faded);
             self.msg_area.add_text(sender, nick_col_style);
             // a space replacing the usual ':'
             self.msg_area.add_text(" ", SegStyle::UserMsg);
         } else {
-            self.msg_area.add_text(&format_nick(sender), nick_col_style);
+            let formatted_nick = self.format_nick(sender);
+            self.msg_area.add_text(&formatted_nick, nick_col_style);
             // separator between nick and msg
             self.msg_area.add_text(": ", SegStyle::Faded);
         }
@@ -465,6 +453,47 @@ impl MessagingUI {
         self.msg_area.add_text(msg, msg_style);
         self.msg_area.set_current_line_alignment();
         self.msg_area.flush_line();
+    }
+
+    pub(crate) fn add_multiline_privmsg(
+        &mut self,
+        sender: &str,
+        lines: &[String],
+        ts: Timestamp,
+        highlight: bool,
+    ) {
+        self.nicks.insert(sender);
+        self.add_timestamp(ts);
+
+        let nick_color = self.get_nick_color(sender);
+        let formatted_nick = self.format_nick(sender);
+        self.msg_area
+            .add_text(&formatted_nick, SegStyle::NickColor(nick_color));
+        self.msg_area.add_text(":", SegStyle::Faded);
+        self.msg_area.flush_line();
+
+        let msg_style = if highlight {
+            SegStyle::Highlight
+        } else {
+            SegStyle::UserMsg
+        };
+        for line in lines {
+            self.msg_area.add_text(line, msg_style);
+            self.msg_area.flush_line();
+        }
+    }
+
+    fn format_nick(&self, nick: &str) -> String {
+        if let Layout::Aligned { max_nick_len, .. } = self.msg_area.layout() {
+            let mut aligned = format!("{nick:>max_nick_len$.max_nick_len$}");
+            if nick.len() > max_nick_len {
+                aligned.pop();
+                aligned.push('…');
+            }
+            aligned
+        } else {
+            nick.to_owned()
+        }
     }
 
     pub(crate) fn add_msg(&mut self, msg: &str, ts: Timestamp) {

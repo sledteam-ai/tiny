@@ -1284,6 +1284,14 @@ impl TUI {
         highlight: bool,
         is_action: bool,
     ) {
+        // Embedded newlines belong to this one logical message; separate add_privmsg calls must
+        // remain separate even when their sender and timestamp match.
+        if !is_action && msg.contains('\n') {
+            let lines = msg.split('\n').map(str::to_owned).collect::<Vec<_>>();
+            self.add_multiline_privmsg(sender, &lines, ts, target, highlight);
+            return;
+        }
+
         let mut notifier = if let Some(serv) = target.serv_name() {
             self.get_tab_config(serv, target.chan_or_user_name())
                 .notify
@@ -1297,6 +1305,32 @@ impl TUI {
             let nick = tab.widget.get_nick();
             if let Some(nick_) = nick {
                 notifier.notify_privmsg(sender, msg, target, &nick_, highlight);
+            }
+        });
+    }
+
+    pub(crate) fn add_multiline_privmsg(
+        &mut self,
+        sender: &str,
+        lines: &[String],
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+    ) {
+        let mut notifier = if let Some(serv) = target.serv_name() {
+            self.get_tab_config(serv, target.chan_or_user_name())
+                .notify
+                .unwrap_or_default()
+        } else {
+            Notifier::default()
+        };
+        self.apply_to_target(target, true, &mut |tab: &mut Tab, _| {
+            tab.widget
+                .add_multiline_privmsg(sender, lines, Timestamp::from(ts), highlight);
+            if let Some(nick) = tab.widget.get_nick() {
+                for line in lines {
+                    notifier.notify_privmsg(sender, line, target, &nick, highlight);
+                }
             }
         });
     }

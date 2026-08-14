@@ -71,6 +71,23 @@ impl UI {
         highlight: bool,
         is_action: bool,
     ));
+
+    pub(crate) fn add_multiline_privmsg(
+        &self,
+        sender: &str,
+        lines: &[String],
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+    ) {
+        self.ui
+            .add_multiline_privmsg(sender, lines, ts, target, highlight);
+        if let Some(logger) = &self.logger {
+            for line in lines {
+                logger.add_privmsg(sender, line, ts, target, highlight, false);
+            }
+        }
+    }
     delegate!(add_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));
     delegate!(remove_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));
     delegate!(rename_nick(
@@ -199,9 +216,7 @@ fn send_lines(ui: &UI, clients: &mut [Client], src: &MsgSource, lines: Vec<Strin
     if client.multiline_privmsg(msg_target, &lines) {
         let ts = time::now();
         let nick = client.get_nick();
-        for line in &lines {
-            ui.add_privmsg(&nick, line, ts, &ui_target, false, false);
-        }
+        ui.add_multiline_privmsg(&nick, &lines, ts, &ui_target, false);
         return;
     }
 
