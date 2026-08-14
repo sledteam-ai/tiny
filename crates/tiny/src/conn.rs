@@ -124,7 +124,10 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) {
             ui.set_nick(client.get_serv_name(), &new_nick);
         }
         Msg(msg) => {
-            handle_irc_msg(ui, client, msg);
+            handle_irc_msg(ui, client, msg, false);
+        }
+        MultilineMsg(msg) => {
+            handle_irc_msg(ui, client, msg, true);
         }
         WireError(err) => {
             ui.add_err_msg(
@@ -145,11 +148,11 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) {
     }
 }
 
-fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
+fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bool) {
     use wire::Cmd::*;
     use wire::Pfx::*;
 
-    let wire::Msg { pfx, cmd } = msg;
+    let wire::Msg { pfx, cmd, .. } = msg;
     let ts = time::now();
     let serv = client.get_serv_name();
     match cmd {
@@ -202,7 +205,16 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                     let ui_msg_target = MsgTarget::Chan { serv, chan: &chan };
                     // Highlight the message if it mentions us.
                     if mentions_user(&msg, &client.get_nick()) {
-                        ui.add_privmsg(sender, &msg, ts, &ui_msg_target, true, is_action);
+                        add_privmsg(
+                            ui,
+                            sender,
+                            &msg,
+                            ts,
+                            &ui_msg_target,
+                            true,
+                            is_action,
+                            is_multiline,
+                        );
                         ui.set_tab_style(TabStyle::Highlight, &ui_msg_target);
                         let mentions_target = MsgTarget::Server { serv: "mentions" };
                         ui.add_msg(
@@ -212,7 +224,16 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                         );
                         ui.set_tab_style(TabStyle::Highlight, &mentions_target);
                     } else {
-                        ui.add_privmsg(sender, &msg, ts, &ui_msg_target, false, is_action);
+                        add_privmsg(
+                            ui,
+                            sender,
+                            &msg,
+                            ts,
+                            &ui_msg_target,
+                            false,
+                            is_action,
+                            is_multiline,
+                        );
                         ui.set_tab_style(TabStyle::NewMsg, &ui_msg_target);
                     }
                 }
@@ -225,7 +246,16 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                     match pfx {
                         Server(_) => {
                             let msg_target = MsgTarget::Server { serv };
-                            ui.add_privmsg(serv, &msg, ts, &msg_target, false, is_action);
+                            add_privmsg(
+                                ui,
+                                serv,
+                                &msg,
+                                ts,
+                                &msg_target,
+                                false,
+                                is_action,
+                                is_multiline,
+                            );
                             if target == client.get_nick() {
                                 ui.set_tab_style(TabStyle::Highlight, &msg_target);
                             } else {
@@ -241,7 +271,16 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                                 } else {
                                     MsgTarget::User { serv, nick }
                                 };
-                                ui.add_privmsg(nick, &msg, ts, &msg_target, false, is_action);
+                                add_privmsg(
+                                    ui,
+                                    nick,
+                                    &msg,
+                                    ts,
+                                    &msg_target,
+                                    false,
+                                    is_action,
+                                    is_multiline,
+                                );
                                 ui.set_tab_style(TabStyle::Highlight, &msg_target);
                             } else {
                                 // PRIVMSG not sent to us. This case can happen in a few cases:
@@ -269,13 +308,15 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                                         // The target is probably a host mask. Show the message in
                                         // the server tab.
                                         let msg_target = MsgTarget::Server { serv };
-                                        ui.add_privmsg(
+                                        add_privmsg(
+                                            ui,
                                             sender,
                                             &msg,
                                             ts,
                                             &msg_target,
                                             false,
                                             is_action,
+                                            is_multiline,
                                         );
                                         ui.set_tab_style(TabStyle::Highlight, &msg_target);
                                     }
@@ -289,13 +330,15 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                                                 serv,
                                                 nick: &target,
                                             };
-                                            ui.add_privmsg(
+                                            add_privmsg(
+                                                ui,
                                                 &client.get_nick(),
                                                 &msg,
                                                 ts,
                                                 &msg_target,
                                                 false,
                                                 is_action,
+                                                is_multiline,
                                             );
                                             // Don't highlight the tab as `Highlight`: the message was sent by us so
                                             // the tab probably doesn't need that much attention. Highlight as `NewMsg`
@@ -304,13 +347,15 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                                         } else {
                                             // Case (2)
                                             let msg_target = MsgTarget::User { serv, nick };
-                                            ui.add_privmsg(
+                                            add_privmsg(
+                                                ui,
                                                 nick,
                                                 &msg,
                                                 ts,
                                                 &msg_target,
                                                 false,
                                                 is_action,
+                                                is_multiline,
                                             );
                                             ui.set_tab_style(TabStyle::Highlight, &msg_target);
                                         }
@@ -577,6 +622,8 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
             }
         }
 
+        BATCH { .. } => {}
+
         Other { cmd, params } => match pfx {
             Some(Server(msg_serv)) => {
                 let msg_target = MsgTarget::Server { serv };
@@ -594,6 +641,25 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg) {
                 debug!("Ignoring command {cmd}: pfx={pfx:?}, params={params:?}");
             }
         },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_privmsg(
+    ui: &UI,
+    sender: &str,
+    msg: &str,
+    ts: time::Tm,
+    target: &MsgTarget,
+    highlight: bool,
+    is_action: bool,
+    is_multiline: bool,
+) {
+    if is_multiline && !is_action {
+        let lines = msg.split('\n').map(str::to_owned).collect::<Vec<_>>();
+        ui.add_multiline_privmsg(sender, &lines, ts, target, highlight);
+    } else {
+        ui.add_privmsg(sender, msg, ts, target, highlight, is_action);
     }
 }
 

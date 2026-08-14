@@ -57,6 +57,14 @@ where
     F: Fn(TestSetup) -> Fut,
     Fut: Future<Output = ()>,
 {
+    run_test_with_size(nick, DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT, test)
+}
+
+fn run_test_with_size<F, Fut>(nick: String, width: u16, height: u16, test: F)
+where
+    F: Fn(TestSetup) -> Fut,
+    Fut: Future<Output = ()>,
+{
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -67,8 +75,7 @@ where
         // Create test TUI
         let (snd_input_ev, rcv_input_ev) = mpsc::channel::<term_input::Event>(100);
         let rcv_input_ev = ReceiverStream::new(rcv_input_ev);
-        let (tui, rcv_tui_ev) =
-            TUI::run_test(DEFAULT_TUI_WIDTH, DEFAULT_TUI_HEIGHT, rcv_input_ev.map(Ok));
+        let (tui, rcv_tui_ev) = TUI::run_test(width, height, rcv_input_ev.map(Ok));
 
         let tiny_ui = UI::new(tui.clone(), None);
 
@@ -97,6 +104,61 @@ where
 }
 
 #[test]
+fn incoming_multiline_event_uses_one_sender_header() {
+    const HEIGHT: u16 = 12;
+    run_test_with_size(
+        "osa1".to_owned(),
+        DEFAULT_TUI_WIDTH,
+        HEIGHT,
+        |TestSetup {
+             tui,
+             snd_input_ev: _snd_input_ev,
+             snd_conn_ev,
+             ..
+         }| async move {
+            let chan = ChanName::new("#camp".to_owned());
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: Some(Pfx::User {
+                        nick: "osa1".to_owned(),
+                        user: "a@b".to_owned(),
+                    }),
+                    cmd: Cmd::JOIN { chan: chan.clone() },
+                }))
+                .await
+                .unwrap();
+            snd_conn_ev
+                .send(client::Event::MultilineMsg(Msg {
+                    tags: Vec::new(),
+                    pfx: Some(Pfx::User {
+                        nick: "mushbot".to_owned(),
+                        user: "bot@localhost".to_owned(),
+                    }),
+                    cmd: Cmd::PRIVMSG {
+                        target: MsgTarget::Chan(chan),
+                        msg: "first line\nsecond line\nthird line".to_owned(),
+                        is_notice: false,
+                        ctcp: None,
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(5).await;
+            tui.draw();
+            assert!(!_snd_input_ev.is_closed());
+
+            let screen = buffer_text(&tui.get_front_buffer(), DEFAULT_TUI_WIDTH, HEIGHT);
+            assert_eq!(screen.matches("mushbot").count(), 1, "{screen}");
+            assert!(
+                screen.contains("first line\nsecond line\nthird line"),
+                "{screen}"
+            );
+        },
+    )
+}
+
+#[test]
 fn test_own_join_focuses_channel_tab() {
     run_test(
         "osa1".to_owned(),
@@ -108,6 +170,7 @@ fn test_own_join_focuses_channel_tab() {
          }| async move {
             let chan = ChanName::new("#camp".to_owned());
             let join = Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "osa1".to_owned(),
                     user: "a@b".to_owned(),
@@ -151,6 +214,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
 
             // Join a channel to test msg sent to channel
             let join = Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "osa1".to_owned(),
                     user: "a@b".to_owned(),
@@ -164,6 +228,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
 
             // Send a PRIVMSG to the channel
             let chan_msg = Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::Ambiguous("tiny_test_user".to_owned())),
                 cmd: Cmd::PRIVMSG {
                     target: MsgTarget::Chan(ChanName::new("#chan".to_owned())),
@@ -180,6 +245,7 @@ fn test_privmsg_from_user_without_user_or_host_part_issue_247() {
 
             // Send a PRIVMSG to current nick
             let msg = Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::Ambiguous("tiny_test_user".to_owned())),
                 cmd: Cmd::PRIVMSG {
                     target: MsgTarget::User("osa1".to_owned()),
@@ -260,6 +326,7 @@ fn test_bouncer_relay_issue_271() {
                 .unwrap();
 
             let msg = Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "osa1-soju".to_owned(),
                     user: "osa1-soju@127.0.0.1".to_owned(),
@@ -330,6 +397,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
 
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
                     pfx: Some(Pfx::User {
                         nick: "SledServ".to_owned(),
                         user: "sledserv-service@localhost".to_owned(),
@@ -390,6 +458,7 @@ fn test_privmsg_targetmask_issue_278() {
 
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
                     pfx: Some(Pfx::User {
                         nick: "tiny_test_user".to_owned(),
                         user: "e@a/b/c.d".to_owned(),
@@ -467,4 +536,19 @@ fn normalize_timestamps(cells: &mut CellBuf, w: u16, h: u16) {
             cells[x + 4].ch = '0';
         }
     }
+}
+
+fn buffer_text(buffer: &CellBuf, width: u16, height: u16) -> String {
+    (0..height)
+        .map(|row| {
+            let start = (row * width) as usize;
+            buffer.cells[start..start + width as usize]
+                .iter()
+                .map(|cell| cell.ch)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

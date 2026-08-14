@@ -281,12 +281,27 @@ pub enum MsgTarget {
 /// An IRC message
 #[derive(Debug, PartialEq, Eq)]
 pub struct Msg {
+    /// IRCv3 message tags, in wire order.
+    pub tags: Vec<MessageTag>,
     /// Sender of a message. According to RFC 2812 it's optional:
     ///
     /// > If the prefix is missing from the message, it is assumed to have originated from the
     /// > connection from which it was received from.
     pub pfx: Option<Pfx>,
     pub cmd: Cmd,
+}
+
+impl Msg {
+    pub fn tag(&self, key: &str) -> Option<&MessageTag> {
+        self.tags.iter().find(|tag| tag.key == key)
+    }
+}
+
+/// An IRCv3 message tag. Tag values are unescaped while parsing.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct MessageTag {
+    pub key: String,
+    pub value: Option<String>,
 }
 
 /// A client-to-client protocol message. See <https://defs.ircdocs.horse/defs/ctcp.html>.
@@ -377,6 +392,13 @@ pub enum Cmd {
         param: String,
     },
 
+    /// An IRCv3 batch. Starts have a type and optional parameters; closes do not.
+    BATCH {
+        reference: String,
+        batch_type: Option<String>,
+        params: Vec<String>,
+    },
+
     /// An IRC message other than the ones listed above.
     Other {
         cmd: String,
@@ -417,6 +439,17 @@ pub fn parse_irc_msg(buf: &mut Vec<u8>) -> Option<Result<Msg, String>> {
 
 // NB. 'msg' does not contain '\r\n' suffix.
 fn parse_one_message(mut msg: &str) -> Result<Msg, String> {
+    let tags = if msg.starts_with('@') {
+        let ws_idx = msg
+            .find(' ')
+            .ok_or_else(|| format!("Can't find tags terminator (' ') in msg: {msg:?}"))?;
+        let tags = parse_tags(&msg[1..ws_idx]);
+        msg = &msg[ws_idx + 1..];
+        tags
+    } else {
+        Vec::new()
+    };
+
     let pfx: Option<Pfx> = {
         if let Some(':') = msg.chars().next() {
             // parse prefix
@@ -551,6 +584,19 @@ fn parse_one_message(mut msg: &str) -> Result<Msg, String> {
         MsgType::Cmd("AUTHENTICATE") if params.len() == 1 => Cmd::AUTHENTICATE {
             param: params[0].to_owned(),
         },
+        MsgType::Cmd("BATCH") if params.len() >= 2 && params[0].starts_with('+') => Cmd::BATCH {
+            reference: params[0][1..].to_owned(),
+            batch_type: Some(params[1].to_owned()),
+            params: params[2..]
+                .iter()
+                .map(|param| (*param).to_owned())
+                .collect(),
+        },
+        MsgType::Cmd("BATCH") if params.len() == 1 && params[0].starts_with('-') => Cmd::BATCH {
+            reference: params[0][1..].to_owned(),
+            batch_type: None,
+            params: Vec::new(),
+        },
         MsgType::Num(n) => Cmd::Reply {
             num: n,
             params: params.into_iter().map(|s| s.to_owned()).collect(),
@@ -561,7 +607,44 @@ fn parse_one_message(mut msg: &str) -> Result<Msg, String> {
         },
     };
 
-    Ok(Msg { pfx, cmd })
+    Ok(Msg { tags, pfx, cmd })
+}
+
+fn parse_tags(tags: &str) -> Vec<MessageTag> {
+    tags.split(';')
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| {
+            let (key, value) = match tag.split_once('=') {
+                Some((key, value)) => (key, Some(unescape_tag_value(value))),
+                None => (tag, None),
+            };
+            MessageTag {
+                key: key.to_owned(),
+                value,
+            }
+        })
+        .collect()
+}
+
+fn unescape_tag_value(value: &str) -> String {
+    let mut unescaped = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(chr) = chars.next() {
+        if chr != '\\' {
+            unescaped.push(chr);
+            continue;
+        }
+        match chars.next() {
+            Some(':') => unescaped.push(';'),
+            Some('s') => unescaped.push(' '),
+            Some('\\') => unescaped.push('\\'),
+            Some('r') => unescaped.push('\r'),
+            Some('n') => unescaped.push('\n'),
+            Some(chr) => unescaped.push(chr),
+            None => {}
+        }
+    }
+    unescaped
 }
 
 fn parse_params(chrs: &str) -> Vec<&str> {
@@ -673,6 +756,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "nick".to_owned(),
                     user: "~nick@unaffiliated/nick".to_owned(),
@@ -689,6 +773,48 @@ mod tests {
     }
 
     #[test]
+    fn ircv3_tags_and_batches_are_preserved() {
+        let mut buf = concat!(
+            "@batch=reply42;draft/multiline-concat;example=hello\\sworld\\:\\\\ ",
+            ":mushbot!u@h PRIVMSG #tiny :continued\r\n",
+            "BATCH +reply42 draft/multiline #tiny\r\n",
+            "BATCH -reply42\r\n",
+        )
+        .as_bytes()
+        .to_vec();
+
+        let fragment = parse_irc_msg(&mut buf).unwrap().unwrap();
+        assert_eq!(
+            fragment.tag("batch").unwrap().value.as_deref(),
+            Some("reply42")
+        );
+        assert_eq!(fragment.tag("draft/multiline-concat").unwrap().value, None);
+        assert_eq!(
+            fragment.tag("example").unwrap().value.as_deref(),
+            Some("hello world;\\")
+        );
+
+        assert!(matches!(
+            parse_irc_msg(&mut buf).unwrap().unwrap().cmd,
+            Cmd::BATCH {
+                reference,
+                batch_type: Some(batch_type),
+                params,
+            } if reference == "reply42"
+                && batch_type == "draft/multiline"
+                && params == ["#tiny"]
+        ));
+        assert!(matches!(
+            parse_irc_msg(&mut buf).unwrap().unwrap().cmd,
+            Cmd::BATCH {
+                reference,
+                batch_type: None,
+                params,
+            } if reference == "reply42" && params.is_empty()
+        ));
+    }
+
+    #[test]
     fn test_notice_parsing() {
         let mut buf = vec![];
         write!(
@@ -699,6 +825,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::Server("barjavel.freenode.net".to_owned())),
                 cmd: Cmd::PRIVMSG {
                     target: MsgTarget::User("*".to_owned()),
@@ -757,6 +884,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "tiny".to_owned(),
                     user: "~tiny@123.123.123.123".to_owned(),
@@ -776,6 +904,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "tiny".to_owned(),
                     user: "~tiny@192.168.0.1".to_owned(),
@@ -800,6 +929,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: Some(Pfx::User {
                     nick: "dan".to_owned(),
                     user: "u@localhost".to_owned(),
@@ -933,6 +1063,7 @@ mod tests {
         assert_eq!(
             parse_irc_msg(&mut buf).unwrap().unwrap(),
             Msg {
+                tags: Vec::new(),
                 pfx: None,
                 cmd: Cmd::ERROR {
                     msg: "Closing Link: 212.252.143.51 (Excess Flood)".to_owned(),

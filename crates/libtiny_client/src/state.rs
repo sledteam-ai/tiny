@@ -330,7 +330,7 @@ impl StateInner {
         snd_ev: &mut Sender<Event>,
         snd_irc_msg: &mut Sender<String>,
     ) {
-        let Msg { pfx, cmd } = msg;
+        let Msg { pfx, cmd, .. } = msg;
 
         use wire::Cmd::*;
         match cmd {
@@ -451,6 +451,7 @@ impl StateInner {
                     let channel = ChanNameRef::new(channel);
                     snd_ev
                         .try_send(Event::Msg(wire::Msg {
+                            tags: Vec::new(),
                             pfx: pfx.clone(),
                             cmd: wire::Cmd::PRIVMSG {
                                 ctcp: None,
@@ -921,6 +922,7 @@ mod tests {
 
     fn cap(subcommand: &str, continuation: bool, params: &[&str]) -> Msg {
         Msg {
+            tags: Vec::new(),
             pfx: Some(Pfx::Server("irc.example".to_owned())),
             cmd: wire::Cmd::CAP {
                 client: "*".to_owned(),

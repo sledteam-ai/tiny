@@ -1,6 +1,7 @@
 #![allow(clippy::unneeded_field_pattern)]
 #![allow(clippy::cognitive_complexity)]
 
+mod multiline;
 mod pinger;
 mod state;
 mod stream;
@@ -111,6 +112,8 @@ pub enum Event {
     NickChange { new_nick: String },
     /// A message from the server
     Msg(wire::Msg),
+    /// One logical IRCv3 `draft/multiline` message reconstructed from a completed batch.
+    MultilineMsg(wire::Msg),
     /// A wire-protocol error
     WireError(String),
     /// Channel join error message
@@ -481,6 +484,7 @@ async fn main_loop(
         let mut rcv_ping_evs = ReceiverStream::new(rcv_ping_evs).fuse();
 
         let mut parse_buf: Vec<u8> = Vec::with_capacity(1024);
+        let mut multiline = multiline::Reassembler::default();
 
         loop {
             let mut read_buf: [u8; 1024] = [0; 1024];
@@ -537,11 +541,21 @@ async fn main_loop(
                                     Err(err) => {
                                         snd_ev.send(Event::WireError(err)).await.unwrap();
                                     }
-                                    Ok(mut msg) => {
+                                    Ok(msg) => {
                                         debug!("parsed msg: {msg:?}");
                                         pinger.reset();
+                                        let (mut msg, is_multiline) = match multiline.process(msg) {
+                                            multiline::Output::Message(msg) => (msg, false),
+                                            multiline::Output::Multiline(msg) => (msg, true),
+                                            multiline::Output::Pending => continue,
+                                        };
                                         irc_state.update(&mut msg, &mut snd_ev, &mut snd_msg);
-                                        snd_ev.send(Event::Msg(msg)).await.unwrap();
+                                        let event = if is_multiline {
+                                            Event::MultilineMsg(msg)
+                                        } else {
+                                            Event::Msg(msg)
+                                        };
+                                        snd_ev.send(event).await.unwrap();
                                     }
                                 }
                             }
@@ -743,6 +757,7 @@ mod client_send_tests {
         let (mut snd_ev, _rcv_ev) = mpsc::channel(10);
         let (mut snd_wire, mut rcv_wire) = mpsc::channel(10);
         let mut ls = wire::Msg {
+            tags: Vec::new(),
             pfx: None,
             cmd: wire::Cmd::CAP {
                 client: "*".to_owned(),
@@ -758,6 +773,7 @@ mod client_send_tests {
         while rcv_wire.try_recv().is_ok() {}
 
         let mut ack = wire::Msg {
+            tags: Vec::new(),
             pfx: None,
             cmd: wire::Cmd::CAP {
                 client: "*".to_owned(),

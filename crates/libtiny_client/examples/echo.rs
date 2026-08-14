@@ -70,6 +70,12 @@ async fn echo_bot_task(server_info: ServerInfo) {
     while let Some(ev) = rcv_ev.next().await {
         println!("Client event: {ev:?}");
         if let Event::Msg(Msg {
+            tags: _,
+            pfx: Some(Pfx::User { nick, .. }),
+            cmd: Cmd::PRIVMSG { target, msg, .. },
+        })
+        | Event::MultilineMsg(Msg {
+            tags: _,
             pfx: Some(Pfx::User { nick, .. }),
             cmd: Cmd::PRIVMSG { target, msg, .. },
         }) = ev
