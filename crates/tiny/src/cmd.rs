@@ -131,10 +131,10 @@ pub(crate) fn command_infos() -> impl Iterator<Item = CommandInfo> {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static CMDS_CMD: Cmd = Cmd {
-    name: "cmds",
+    name: "?",
     cmd_fn: cmds,
     summary: "Lists available commands",
-    usage: "`/cmds`",
+    usage: "`/?`",
 };
 
 fn cmds(args: CmdArgs) {
@@ -705,8 +705,8 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "ets");
     assert_eq!(args, "");
 
-    let ParsedCmd { cmd, args } = parse_cmd("cmds").unwrap();
-    assert_eq!(cmd.name, "cmds");
+    let ParsedCmd { cmd, args } = parse_cmd("?").unwrap();
+    assert_eq!(cmd.name, "?");
     assert_eq!(args, "");
 
     let ParsedCmd { cmd, args } =
@@ -746,7 +746,7 @@ fn test_command_metadata() {
         );
     }
 
-    for name in ["cmds", "ets", "expedition", "trail", "span"] {
+    for name in ["?", "ets", "expedition", "trail", "span"] {
         assert!(names.contains(name), "missing command metadata: {name}");
     }
 
@@ -784,7 +784,7 @@ fn test_cmds_is_local_and_uses_command_metadata() {
         // An empty client list also verifies that this local command does not use the IRC send
         // path, which requires a client for the current server.
         run_cmd(
-            "cmds",
+            "?",
             MsgSource::Serv {
                 serv: "test-server".to_owned(),
             },
