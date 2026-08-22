@@ -7,6 +7,10 @@ use libtiny_tui::config::Chan;
 
 use std::borrow::Borrow;
 
+// Sledteam-owned command dispatch lives separately from Tiny's native IRC commands.
+#[path = "sledteam_cmd.rs"]
+mod sledteam;
+
 pub(crate) fn run_cmd(
     cmd: &str,
     src: MsgSource,
@@ -117,16 +121,8 @@ static TINY_IRC_CMDS: [&Cmd; 10] = [
     &HELP_CMD,
 ];
 
-static SLEDTEAM_CMDS: [&Cmd; 5] = [
-    &ETS_CMD,
-    &EXPEDITION_CMD,
-    &SPAN_CMD,
-    &TRAIL_CMD,
-    &SHUTDOWN_CMD,
-];
-
 fn commands() -> impl Iterator<Item = &'static Cmd> {
-    TINY_IRC_CMDS.into_iter().chain(SLEDTEAM_CMDS)
+    TINY_IRC_CMDS.into_iter().chain(sledteam::commands())
 }
 
 #[cfg(test)]
@@ -172,106 +168,13 @@ fn print_help(ui: &UI) {
 
     ui.add_client_msg("", &MsgTarget::CurrentTab);
     ui.add_client_msg("Sledteam Commands:", &MsgTarget::CurrentTab);
-    for info in SLEDTEAM_CMDS.iter().map(|cmd| cmd.info()) {
+    for info in sledteam::commands().map(|cmd| cmd.info()) {
         ui.add_client_msg(
             &format!("{:<45} - {}", info.usage, info.summary),
             &MsgTarget::CurrentTab,
         );
     }
 }
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-static ETS_CMD: Cmd = Cmd {
-    name: "ets",
-    cmd_fn: ets,
-    summary: "Requests ETS data from SledServ",
-    usage: "`/ets`",
-};
-
-fn ets(args: CmdArgs) {
-    if !args.args.is_empty() {
-        return args
-            .ui
-            .add_client_err_msg(&format!("Usage: {}", ETS_CMD.usage), &MsgTarget::CurrentTab);
-    }
-
-    send_sledserv(args, "ets");
-}
-
-static EXPEDITION_CMD: Cmd = Cmd {
-    name: "expedition",
-    cmd_fn: expedition,
-    summary: "Sends an expedition command to SledServ",
-    usage: "`/expedition <arguments>`",
-};
-
-fn expedition(args: CmdArgs) {
-    send_sledserv(args, "expedition");
-}
-
-static SPAN_CMD: Cmd = Cmd {
-    name: "span",
-    cmd_fn: span,
-    summary: "Sends a span command to SledServ",
-    usage: "`/span <arguments>`",
-};
-
-fn span(args: CmdArgs) {
-    send_sledserv(args, "span");
-}
-
-static TRAIL_CMD: Cmd = Cmd {
-    name: "trail",
-    cmd_fn: trail,
-    summary: "Sends a trail command to SledServ",
-    usage: "`/trail <arguments>`",
-};
-
-fn trail(args: CmdArgs) {
-    send_sledserv(args, "trail");
-}
-
-static SHUTDOWN_CMD: Cmd = Cmd {
-    name: "shutdown",
-    cmd_fn: shutdown,
-    summary: "Shuts down the running Sledteam runtime",
-    usage: "`/shutdown sledteam`",
-};
-
-fn shutdown(args: CmdArgs) {
-    if args.args != "sledteam" {
-        return args.ui.add_client_err_msg(
-            &format!("Usage: {}", SHUTDOWN_CMD.usage),
-            &MsgTarget::CurrentTab,
-        );
-    }
-
-    send_sledserv(args, "shutdown");
-}
-
-fn send_sledserv(args: CmdArgs, command: &str) {
-    let CmdArgs {
-        args,
-        ui,
-        clients,
-        src,
-        ..
-    } = args;
-
-    let msg = if args.is_empty() {
-        command.to_owned()
-    } else {
-        format!("{command} {args}")
-    };
-    let client = find_client(clients, src.serv_name()).unwrap();
-    for chunk in client.split_privmsg(crate::sledserv::NICK.len(), &msg) {
-        client.privmsg(crate::sledserv::NICK, chunk, false);
-        ui.record_sledserv_request(src.clone(), &msg);
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static AWAY_CMD: Cmd = Cmd {
     name: "away",
