@@ -314,17 +314,7 @@ impl TUI {
                 CmdResult::Handled
             }
             Some("help") => {
-                self.add_client_msg("TUI Commands: ", &MsgTarget::CurrentTab);
-                for cmd in TUI_COMMANDS.iter() {
-                    self.add_client_msg(
-                        &format!(
-                            "/{:<10} - {:<25} - Usage: {}",
-                            cmd.name, cmd.summary, cmd.usage
-                        ),
-                        &MsgTarget::CurrentTab,
-                    );
-                }
-                // Fall through to print help for cmd.rs commands
+                // Fall through so the client can render all command groups together.
                 CmdResult::Pass
             }
             Some("quit") => {

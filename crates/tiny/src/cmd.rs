@@ -50,7 +50,7 @@ fn parse_cmd(cmd: &str) -> Option<ParsedCmd<'_>> {
         None => "",
         Some(rest_idx) => &cmd[rest_idx..],
     };
-    for cmd in &CMDS {
+    for cmd in commands() {
         if cmd_name == cmd.name {
             return Some(ParsedCmd { cmd, args: rest });
         }
@@ -104,28 +104,37 @@ fn find_client<'a>(clients: &'a mut [Client], serv_name: &str) -> Option<&'a mut
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static CMDS: [&Cmd; 14] = [
+static TINY_IRC_CMDS: [&Cmd; 10] = [
     &AWAY_CMD,
     &CLOSE_CMD,
     &CMDS_CMD,
     &CONNECT_CMD,
-    &ETS_CMD,
-    &EXPEDITION_CMD,
     &JOIN_CMD,
     &ME_CMD,
     &MSG_CMD,
     &NAMES_CMD,
     &NICK_CMD,
-    &SPAN_CMD,
-    &TRAIL_CMD,
     &HELP_CMD,
 ];
 
-pub(crate) fn command_infos() -> impl Iterator<Item = CommandInfo> {
+static SLEDTEAM_CMDS: [&Cmd; 5] = [
+    &ETS_CMD,
+    &EXPEDITION_CMD,
+    &SPAN_CMD,
+    &TRAIL_CMD,
+    &SHUTDOWN_CMD,
+];
+
+fn commands() -> impl Iterator<Item = &'static Cmd> {
+    TINY_IRC_CMDS.into_iter().chain(SLEDTEAM_CMDS)
+}
+
+#[cfg(test)]
+fn command_infos() -> impl Iterator<Item = CommandInfo> {
     libtiny_tui::command_infos()
         .iter()
         .copied()
-        .chain(CMDS.iter().map(|cmd| cmd.info()))
+        .chain(commands().map(|cmd| cmd.info()))
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -145,10 +154,26 @@ fn cmds(args: CmdArgs) {
         );
     }
 
-    args.ui
-        .add_client_msg("Available Commands:", &MsgTarget::CurrentTab);
-    for info in command_infos() {
-        args.ui.add_client_msg(
+    print_help(args.ui);
+}
+
+fn print_help(ui: &UI) {
+    ui.add_client_msg("Tiny / IRC Commands:", &MsgTarget::CurrentTab);
+    for info in libtiny_tui::command_infos()
+        .iter()
+        .copied()
+        .chain(TINY_IRC_CMDS.iter().map(|cmd| cmd.info()))
+    {
+        ui.add_client_msg(
+            &format!("{:<45} - {}", info.usage, info.summary),
+            &MsgTarget::CurrentTab,
+        );
+    }
+
+    ui.add_client_msg("", &MsgTarget::CurrentTab);
+    ui.add_client_msg("Sledteam Commands:", &MsgTarget::CurrentTab);
+    for info in SLEDTEAM_CMDS.iter().map(|cmd| cmd.info()) {
+        ui.add_client_msg(
             &format!("{:<45} - {}", info.usage, info.summary),
             &MsgTarget::CurrentTab,
         );
@@ -205,6 +230,24 @@ static TRAIL_CMD: Cmd = Cmd {
 
 fn trail(args: CmdArgs) {
     send_sledserv(args, "trail");
+}
+
+static SHUTDOWN_CMD: Cmd = Cmd {
+    name: "shutdown",
+    cmd_fn: shutdown,
+    summary: "Shuts down the running Sledteam runtime",
+    usage: "`/shutdown sledteam`",
+};
+
+fn shutdown(args: CmdArgs) {
+    if args.args != "sledteam" {
+        return args.ui.add_client_err_msg(
+            &format!("Usage: {}", SHUTDOWN_CMD.usage),
+            &MsgTarget::CurrentTab,
+        );
+    }
+
+    send_sledserv(args, "shutdown");
 }
 
 fn send_sledserv(args: CmdArgs, command: &str) {
@@ -677,16 +720,7 @@ static HELP_CMD: Cmd = Cmd {
 
 fn help(args: CmdArgs) {
     let CmdArgs { ui, .. } = args;
-    ui.add_client_msg("Client Commands:", &MsgTarget::CurrentTab);
-    for cmd in CMDS.iter() {
-        ui.add_client_msg(
-            &format!(
-                "/{:<10} - {:<25} - Usage: {}",
-                cmd.name, cmd.summary, cmd.usage
-            ),
-            &MsgTarget::CurrentTab,
-        )
-    }
+    print_help(ui);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -722,6 +756,10 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "span");
     assert_eq!(args, "add write schema");
 
+    let ParsedCmd { cmd, args } = parse_cmd("shutdown sledteam").unwrap();
+    assert_eq!(cmd.name, "shutdown");
+    assert_eq!(args, "sledteam");
+
     assert!(parse_cmd("bearings").is_none());
 }
 
@@ -746,18 +784,18 @@ fn test_command_metadata() {
         );
     }
 
-    for name in ["?", "ets", "expedition", "trail", "span"] {
+    for name in ["?", "ets", "expedition", "trail", "span", "shutdown"] {
         assert!(names.contains(name), "missing command metadata: {name}");
     }
 
-    for cmd in CMDS {
+    for cmd in commands() {
         let parsed = parse_cmd(cmd.name).unwrap();
         assert_eq!(parsed.cmd.info(), cmd.info());
     }
 }
 
 #[test]
-fn test_cmds_is_local_and_uses_command_metadata() {
+fn test_help_commands_are_local_and_grouped_by_ownership() {
     use libtiny_tui::TUI;
     use libtiny_tui::test_utils::buffer_str;
     use tokio::runtime::Builder;
@@ -769,11 +807,6 @@ fn test_cmds_is_local_and_uses_command_metadata() {
     let local = tokio::task::LocalSet::new();
 
     local.block_on(&runtime, async {
-        let (snd_input, rcv_input) = mpsc::channel(1);
-        let input = ReceiverStream::new(rcv_input).map(Ok);
-        let (tui, _tui_events) = TUI::run_test(160, 60, input);
-        let ui = UI::new(tui.clone(), None);
-        ui.new_server_tab("test-server", None);
         let defaults = Defaults {
             nicks: vec!["tiny-test".to_owned()],
             realname: "Tiny test".to_owned(),
@@ -783,28 +816,40 @@ fn test_cmds_is_local_and_uses_command_metadata() {
 
         // An empty client list also verifies that this local command does not use the IRC send
         // path, which requires a client for the current server.
-        run_cmd(
-            "?",
-            MsgSource::Serv {
-                serv: "test-server".to_owned(),
-            },
-            &defaults,
-            &ui,
-            &mut Vec::new(),
-        );
-        ui.draw();
+        for command in ["?", "help"] {
+            let (snd_input, rcv_input) = mpsc::channel(1);
+            let input = ReceiverStream::new(rcv_input).map(Ok);
+            let (tui, _tui_events) = TUI::run_test(160, 60, input);
+            let ui = UI::new(tui.clone(), None);
+            ui.new_server_tab("test-server", None);
 
-        let output = buffer_str(&tui.get_front_buffer(), 160, 60);
-        assert!(output.contains("Available Commands:"));
-        for info in command_infos() {
-            assert!(
-                output.contains(&format!("{:<45} - {}", info.usage, info.summary)),
-                "missing command output for {}",
-                info.name
+            run_cmd(
+                command,
+                MsgSource::Serv {
+                    serv: "test-server".to_owned(),
+                },
+                &defaults,
+                &ui,
+                &mut Vec::new(),
             );
-        }
+            ui.draw();
 
-        drop(snd_input);
+            let output = buffer_str(&tui.get_front_buffer(), 160, 60);
+            let tiny_heading = output.find("Tiny / IRC Commands:").unwrap();
+            let sledteam_heading = output.find("Sledteam Commands:").unwrap();
+            let quit_help = output.find("`/quit` or `/quit <reason>`").unwrap();
+            let shutdown_help = output.find("`/shutdown sledteam`").unwrap();
+            assert!(tiny_heading < quit_help && quit_help < sledteam_heading);
+            assert!(sledteam_heading < shutdown_help);
+            for info in command_infos() {
+                assert!(
+                    output.contains(&format!("{:<45} - {}", info.usage, info.summary)),
+                    "missing command output for {} from /{command}",
+                    info.name
+                );
+            }
+            drop(snd_input);
+        }
     });
 }
 
@@ -849,7 +894,7 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
                         .unwrap();
                 } else if line.starts_with("PRIVMSG ") {
                     privmsgs.push(line);
-                    if privmsgs.len() == 8 {
+                    if privmsgs.len() == 10 {
                         break;
                     }
                 }
@@ -906,6 +951,16 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
         ui.draw();
         assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/ets`"));
 
+        run_cmd(
+            "shutdown tiny",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        ui.draw();
+        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/shutdown sledteam`"));
+
         run_cmd("ets", source.clone(), &defaults, &ui, &mut clients);
         assert!(!ui.user_tab_exists("127.0.0.1", crate::sledserv::NICK));
         run_cmd(
@@ -957,10 +1012,30 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             &ui,
             &mut clients,
         );
+        run_cmd(
+            "shutdown sledteam",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
+        run_cmd(
+            "msg SledServ shutdown sledteam",
+            source.clone(),
+            &defaults,
+            &ui,
+            &mut clients,
+        );
 
         assert_eq!(
             ui.pending_sledserv_origins(),
-            [source.clone(), source.clone(), source.clone(), source]
+            [
+                source.clone(),
+                source.clone(),
+                source.clone(),
+                source.clone(),
+                source
+            ]
         );
 
         assert_eq!(
@@ -976,6 +1051,8 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
                 "PRIVMSG SledServ :trail add buy supplies".to_owned(),
                 "PRIVMSG SledServ :span add write schema".to_owned(),
                 "PRIVMSG SledServ :span add write schema".to_owned(),
+                "PRIVMSG SledServ :shutdown sledteam".to_owned(),
+                "PRIVMSG SledServ :shutdown sledteam".to_owned(),
             ]
         );
 
