@@ -14,6 +14,10 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+use std::rc::Rc;
+
 macro_rules! delegate {
     ( $name:ident ( $( $x:ident: $t:ty, )* )) => {
         pub(crate) fn $name(&self, $($x: $t,)*) {
@@ -38,6 +42,7 @@ pub(crate) struct UI {
     ui: TUI,
     logger: Option<Logger>,
     sledserv_requests: PendingRequests,
+    intentional_shutdowns: Rc<RefCell<HashSet<String>>>,
 }
 
 impl UI {
@@ -46,6 +51,7 @@ impl UI {
             ui,
             logger,
             sledserv_requests: PendingRequests::default(),
+            intentional_shutdowns: Rc::new(RefCell::new(HashSet::new())),
         }
     }
 
@@ -129,11 +135,33 @@ impl UI {
         let Some(response) = self.sledserv_requests.consume(serv, sender, msg) else {
             return false;
         };
+        if response.intentional_shutdown {
+            self.intentional_shutdowns
+                .borrow_mut()
+                .insert(serv.to_owned());
+        }
         let target = response.origin.to_target();
         for line in response.lines {
             self.add_client_msg(&line, &target);
         }
         true
+    }
+
+    pub(crate) fn take_intentional_shutdown(&self, serv: &str) -> bool {
+        self.intentional_shutdowns.borrow_mut().remove(serv)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn intentional_shutdown_pending(&self, serv: &str) -> bool {
+        self.intentional_shutdowns.borrow().contains(serv)
+    }
+
+    pub(crate) fn quit(&self, msg: Option<String>) {
+        self.ui.quit(msg);
+    }
+
+    pub(crate) fn clear_terminal_on_exit(&self) {
+        self.ui.clear_terminal_on_exit();
     }
 
     #[cfg(test)]
@@ -301,5 +329,40 @@ pub(crate) fn send_msg(
     for msg in client.split_privmsg(extra_len, &msg) {
         client.privmsg(msg_target, msg, is_action);
         ui.add_privmsg(&client.get_nick(), msg, ts, &ui_target, false, is_action);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libtiny_tui::TUI;
+    use tokio::runtime::Builder;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    #[test]
+    fn clean_quit_signal_stops_ui_task() {
+        let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+        let local = tokio::task::LocalSet::new();
+
+        local.block_on(&runtime, async {
+            let (_snd_input, rcv_input) = mpsc::channel(1);
+            let (tui, _tui_events) = TUI::run_test(40, 5, ReceiverStream::new(rcv_input).map(Ok));
+            let ui = UI::new(tui, None);
+            let defaults = config::Defaults {
+                nicks: vec!["tiny-test".to_owned()],
+                realname: "Tiny test".to_owned(),
+                join: Vec::new(),
+                tls: false,
+            };
+
+            let ui_task =
+                tokio::task::spawn_local(task(defaults, ui.clone(), Vec::new(), _tui_events));
+            ui.quit(None);
+
+            tokio::time::timeout(std::time::Duration::from_secs(1), ui_task)
+                .await
+                .expect("UI task did not exit after the clean quit signal")
+                .unwrap();
+        });
     }
 }

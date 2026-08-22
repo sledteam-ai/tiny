@@ -11,6 +11,10 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
+use std::time::Duration;
+
+const INTENTIONAL_SHUTDOWN_LINGER: Duration = Duration::from_millis(600);
+
 pub(crate) trait Client {
     fn get_serv_name(&self) -> &str;
 
@@ -38,14 +42,30 @@ pub(crate) async fn task(
     ui: UI,
     client: Box<dyn Client>,
 ) {
+    task_with_linger(rcv_ev, ui, client, INTENTIONAL_SHUTDOWN_LINGER).await;
+}
+
+pub(crate) async fn task_with_linger(
+    rcv_ev: mpsc::Receiver<libtiny_client::Event>,
+    ui: UI,
+    client: Box<dyn Client>,
+    intentional_shutdown_linger: Duration,
+) {
     let mut rcv_ev = ReceiverStream::new(rcv_ev);
     while let Some(ev) = rcv_ev.next().await {
-        handle_conn_ev(&ui, &*client, ev);
+        if handle_conn_ev(&ui, &*client, ev) {
+            // Let the application-wide quit event send the sole Client::quit command. Sending it
+            // through this client clone first would close the command receiver before that event.
+            tokio::time::sleep(intentional_shutdown_linger).await;
+            ui.clear_terminal_on_exit();
+            ui.quit(None);
+            return;
+        }
         ui.draw();
     }
 }
 
-fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) {
+fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) -> bool {
     use libtiny_client::Event::*;
     match ev {
         ResolvingHost => {
@@ -94,6 +114,9 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) {
             );
         }
         ConnectionClosed => {
+            if ui.take_intentional_shutdown(client.get_serv_name()) {
+                return true;
+            }
             ui.add_err_msg(
                 "Connection closed on the remote end",
                 time::now(),
@@ -146,6 +169,7 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) {
             },
         ),
     }
+    false
 }
 
 fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bool) {
@@ -709,4 +733,9 @@ fn mention_check() {
     assert!(mentions_user(" abc,", "abc"));
     assert!(!mentions_user(" aaaa ", "aa"));
     assert!(mentions_user(" aa,aa ", "aa"));
+}
+
+#[test]
+fn intentional_shutdown_uses_brief_linger() {
+    assert_eq!(INTENTIONAL_SHUTDOWN_LINGER, Duration::from_millis(600));
 }

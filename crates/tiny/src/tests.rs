@@ -12,6 +12,7 @@ use term_input as input;
 
 use std::future::Future;
 use std::panic::Location;
+use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -81,12 +82,12 @@ where
 
         // Create test connection event channel
         let (snd_conn_ev, rcv_conn_ev) = mpsc::channel::<client::Event>(100);
-
         // Spawn connection event handler task
-        tokio::task::spawn_local(conn::task(
+        tokio::task::spawn_local(conn::task_with_linger(
             rcv_conn_ev,
             tiny_ui.clone(),
             Box::new(TestClient { nick }),
+            Duration::ZERO,
         ));
 
         tui.new_server_tab(SERV_NAME, None);
@@ -415,6 +416,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
 
             assert!(!ui.user_tab_exists(SERV_NAME, "SledServ"));
             assert!(ui.pending_sledserv_origins().is_empty());
+            assert!(!ui.intentional_shutdown_pending(SERV_NAME));
             assert_eq!(
                 tui.current_tab(),
                 Some(MsgSource::Serv {
@@ -455,6 +457,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
 
             assert!(!ui.user_tab_exists(SERV_NAME, "SledServ"));
             assert!(ui.pending_sledserv_origins().is_empty());
+            assert!(ui.intentional_shutdown_pending(SERV_NAME));
             tui.draw();
             let output = libtiny_tui::test_utils::buffer_str(
                 &tui.get_front_buffer(),
@@ -466,6 +469,103 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 rcv_tui_ev.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)
             ));
+
+            snd_conn_ev
+                .send(client::Event::ConnectionClosed)
+                .await
+                .unwrap();
+            snd_conn_ev.send(client::Event::Disconnected).await.unwrap();
+            yield_(5).await;
+
+            assert!(!ui.intentional_shutdown_pending(SERV_NAME));
+            assert!(matches!(
+                rcv_tui_ev.recv().await,
+                Some(libtiny_common::Event::Quit { msg: None })
+            ));
+        },
+    )
+}
+
+#[test]
+fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
+    const HEIGHT: u16 = 12;
+    run_test_with_size(
+        "osa1".to_owned(),
+        DEFAULT_TUI_WIDTH,
+        HEIGHT,
+        |TestSetup {
+             tui,
+             snd_input_ev,
+             snd_conn_ev,
+             ui,
+             ..
+         }| async move {
+            next_tab(&snd_input_ev).await;
+            yield_(3).await;
+
+            snd_conn_ev
+                .send(client::Event::ConnectionClosed)
+                .await
+                .unwrap();
+            snd_conn_ev.send(client::Event::Disconnected).await.unwrap();
+            yield_(5).await;
+
+            tui.draw();
+            let output = libtiny_tui::test_utils::buffer_str(
+                &tui.get_front_buffer(),
+                DEFAULT_TUI_WIDTH,
+                HEIGHT,
+            );
+            assert!(output.contains("Connection closed"), "{output:?}");
+            assert!(
+                output.contains("Disconnected. Will try to reconnect in")
+                    && output.contains("30 seconds."),
+                "{output:?}"
+            );
+
+            ui.record_sledserv_request(
+                MsgSource::Serv {
+                    serv: SERV_NAME.to_owned(),
+                },
+                "shutdown sledteam",
+            );
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: Some(Pfx::User {
+                        nick: "SledServ".to_owned(),
+                        user: "sledserv-service@localhost".to_owned(),
+                    }),
+                    cmd: Cmd::PRIVMSG {
+                        target: MsgTarget::User("osa1".to_owned()),
+                        msg: r#"{"schema_version":1,"command":"runtime.shutdown","status":"error","error":{"code":"shutdown_request_failed","message":"Could not contact the runtime."}}"#.to_owned(),
+                        is_notice: false,
+                        ctcp: None,
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(5).await;
+
+            assert!(!ui.intentional_shutdown_pending(SERV_NAME));
+            snd_conn_ev
+                .send(client::Event::ConnectionClosed)
+                .await
+                .unwrap();
+            snd_conn_ev.send(client::Event::Disconnected).await.unwrap();
+            yield_(5).await;
+
+            tui.draw();
+            let output = libtiny_tui::test_utils::buffer_str(
+                &tui.get_front_buffer(),
+                DEFAULT_TUI_WIDTH,
+                HEIGHT,
+            );
+            assert!(output.contains("shutdown_request_failed"));
+            assert!(output.contains("Connection closed"));
+            assert!(output.contains("Disconnected. Will try to reconnect in"));
+            assert!(output.contains("30 seconds."));
+            drop(snd_input_ev);
         },
     )
 }

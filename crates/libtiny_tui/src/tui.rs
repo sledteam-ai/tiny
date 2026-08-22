@@ -134,6 +134,10 @@ impl TUI {
         self.tb.get_front_buffer()
     }
 
+    pub(crate) fn clear_terminal_on_exit(&mut self) {
+        self.tb.clear_terminal_on_drop();
+    }
+
     #[cfg(test)]
     pub(crate) fn navigation_dialog_visible(&self) -> bool {
         self.navigation_dialog_visible

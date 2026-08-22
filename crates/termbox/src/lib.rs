@@ -46,6 +46,7 @@ pub struct Termbox {
     // value.
     terminal_cursor: (u16, u16),
     output_buffer: Vec<u8>,
+    clear_terminal_on_drop: bool,
     // total_flushed: u64,
 }
 
@@ -166,6 +167,7 @@ impl Termbox {
             cursor: Some((0, 0)),
             terminal_cursor: (0, 0),
             output_buffer: Vec::with_capacity(32 * 1024),
+            clear_terminal_on_drop: false,
             // total_flushed: 0,
         };
 
@@ -192,6 +194,7 @@ impl Termbox {
             cursor: Some((0, 0)),
             terminal_cursor: (0, 0),
             output_buffer: Vec::with_capacity(32 * 1024),
+            clear_terminal_on_drop: false,
         }
     }
 
@@ -254,6 +257,15 @@ impl Termbox {
             self.buffer_size_change_request = false;
         }
         self.back_buffer.clear(self.clear_fg, self.clear_bg);
+    }
+
+    pub fn clear_terminal_on_drop(&mut self) {
+        self.clear_terminal_on_drop = true;
+    }
+
+    #[cfg(test)]
+    fn terminal_clear_on_drop_requested(&self) -> bool {
+        self.clear_terminal_on_drop
     }
 
     pub fn set_clear_attributes(&mut self, fg: u8, bg: u8) {
@@ -509,6 +521,11 @@ impl Drop for Termbox {
             .extend_from_slice(termion::clear::All.as_ref());
         // T_EXIT_CA for xterm
         self.output_buffer.extend_from_slice(b"\x1b[?1049l");
+        if self.clear_terminal_on_drop {
+            self.output_buffer
+                .extend_from_slice(termion::clear::All.as_ref());
+            goto(&mut self.output_buffer, 1, 1);
+        }
         self.flush_output_buffer();
 
         if self.tty.is_some() {
@@ -518,6 +535,21 @@ impl Drop for Termbox {
         }
 
         //  eprintln!("Total bytes flushed: {}", self.total_flushed);
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_clear_is_opt_in() {
+        let mut tb = Termbox::init_test(40, 5);
+        assert!(!tb.terminal_clear_on_drop_requested());
+
+        tb.clear_terminal_on_drop();
+
+        assert!(tb.terminal_clear_on_drop_requested());
     }
 }
 

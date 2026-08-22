@@ -49,6 +49,7 @@ extern crate log;
 #[derive(Clone)]
 pub struct TUI {
     inner: Weak<RefCell<tui::TUI>>,
+    snd_quit: mpsc::Sender<Option<String>>,
 }
 
 impl TUI {
@@ -57,6 +58,7 @@ impl TUI {
         let inner = Rc::downgrade(&tui);
 
         let (snd_ev, rcv_ev) = mpsc::channel(10);
+        let (snd_quit, rcv_quit) = mpsc::channel(1);
 
         // For SIGWINCH handler
         let (snd_abort, rcv_abort) = mpsc::channel::<()>(1);
@@ -66,9 +68,9 @@ impl TUI {
 
         // Spawn input handler task
         let input = Input::new();
-        spawn_local(input_handler(input, tui, snd_ev, snd_abort));
+        spawn_local(input_handler(input, tui, snd_ev, snd_abort, rcv_quit));
 
-        (TUI { inner }, rcv_ev)
+        (TUI { inner, snd_quit }, rcv_ev)
     }
 
     /// Create a test instance that doesn't render to the terminal, just updates the termbox
@@ -81,14 +83,32 @@ impl TUI {
         let inner = Rc::downgrade(&tui);
 
         let (snd_ev, rcv_ev) = mpsc::channel(10);
+        let (snd_quit, rcv_quit) = mpsc::channel(1);
 
         // We don't need to handle SIGWINCH in testing so the receiver end is not used
         let (snd_abort, _rcv_abort) = mpsc::channel::<()>(1);
 
         // Spawn input handler task
-        spawn_local(input_handler(input_stream, tui, snd_ev, snd_abort));
+        spawn_local(input_handler(
+            input_stream,
+            tui,
+            snd_ev,
+            snd_abort,
+            rcv_quit,
+        ));
 
-        (TUI { inner }, rcv_ev)
+        (TUI { inner, snd_quit }, rcv_ev)
+    }
+
+    /// Follow the same clean shutdown path as the `/quit` command.
+    pub fn quit(&self, msg: Option<String>) {
+        let _ = self.snd_quit.try_send(msg);
+    }
+
+    pub fn clear_terminal_on_exit(&self) {
+        if let Some(tui) = self.inner.upgrade() {
+            tui.borrow_mut().clear_terminal_on_exit();
+        }
     }
 
     /// Get termbox front buffer. Useful for testing rendering.
@@ -133,11 +153,23 @@ async fn input_handler<S>(
     tui: Rc<RefCell<tui::TUI>>,
     snd_ev: mpsc::Sender<Event>,
     snd_abort: mpsc::Sender<()>,
+    rcv_quit: mpsc::Receiver<Option<String>>,
 ) where
     S: Stream<Item = std::io::Result<term_input::Event>> + Unpin,
 {
+    let mut rcv_quit = ReceiverStream::new(rcv_quit);
     loop {
-        match input_stream.next().await {
+        let input = select! {
+            input = input_stream.next() => input,
+            msg = rcv_quit.next() => {
+                if let Some(msg) = msg {
+                    snd_ev.try_send(Event::Quit { msg }).unwrap();
+                }
+                let _ = snd_abort.try_send(());
+                return;
+            }
+        };
+        match input {
             None => {
                 break;
             }
