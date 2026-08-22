@@ -433,6 +433,39 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 rcv_tui_ev.try_recv(),
                 Err(mpsc::error::TryRecvError::Empty)
             ));
+
+            ui.record_sledserv_request(origin, "shutdown sledteam");
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: Some(Pfx::User {
+                        nick: "SledServ".to_owned(),
+                        user: "sledserv-service@localhost".to_owned(),
+                    }),
+                    cmd: Cmd::PRIVMSG {
+                        target: MsgTarget::User("osa1".to_owned()),
+                        msg: r#"{"schema_version":1,"command":"runtime.shutdown","status":"ok","data":{"message":"Sledteam shutdown request sent."}}"#.to_owned(),
+                        is_notice: false,
+                        ctcp: None,
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(5).await;
+
+            assert!(!ui.user_tab_exists(SERV_NAME, "SledServ"));
+            assert!(ui.pending_sledserv_origins().is_empty());
+            tui.draw();
+            let output = libtiny_tui::test_utils::buffer_str(
+                &tui.get_front_buffer(),
+                DEFAULT_TUI_WIDTH,
+                DEFAULT_TUI_HEIGHT,
+            );
+            assert!(output.contains("Shutting down Sledteam…"), "{output:?}");
+            assert!(matches!(
+                rcv_tui_ev.try_recv(),
+                Err(mpsc::error::TryRecvError::Empty)
+            ));
         },
     )
 }

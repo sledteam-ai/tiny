@@ -760,6 +760,8 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "shutdown");
     assert_eq!(args, "sledteam");
 
+    // `/quit` remains owned by the TUI and must not be captured by client command aliases.
+    assert!(parse_cmd("quit").is_none());
     assert!(parse_cmd("bearings").is_none());
 }
 

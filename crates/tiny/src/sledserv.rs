@@ -55,9 +55,13 @@ impl PendingRequests {
             .split_whitespace()
             .next()
             .unwrap_or(command_label);
+        let response_command_prefix = match command_name {
+            "shutdown" => "runtime.shutdown".to_owned(),
+            _ => format!("travel.{command_name}"),
+        };
         self.inner.borrow_mut().push_back(PendingRequest {
             origin,
-            response_command_prefix: format!("travel.{command_name}"),
+            response_command_prefix,
             command_label: command_label.to_owned(),
         });
     }
@@ -113,6 +117,9 @@ fn format_response(response: Response, command_label: &str) -> Vec<String> {
             "Sledteam {}: {} ({})",
             response.command, error.message, error.code
         )],
+        Outcome::Ok { .. } if response.command == "runtime.shutdown" => {
+            vec!["Shutting down Sledteam…".to_owned()]
+        }
         Outcome::Ok { data: None } => vec![format!("Sledteam {}: ok", response.command)],
         Outcome::Ok { data: Some(data) } => {
             if let Some(lines) = format_travel_tree(&response.command, &data) {
@@ -340,6 +347,45 @@ mod tests {
         assert_eq!(response.origin, channel("irc", "#second"));
         assert_eq!(response.lines, ["ets", "Moonshot", "└── North"]);
         assert_eq!(pending.origins(), [channel("irc", "#first")]);
+    }
+
+    #[test]
+    fn shutdown_acknowledgement_uses_runtime_command_and_local_message() {
+        let pending = PendingRequests::default();
+        let origin = channel("irc", "#camp");
+        pending.record(origin.clone(), "shutdown sledteam");
+
+        let response = pending
+            .consume(
+                "irc",
+                NICK,
+                r#"{"schema_version":1,"command":"runtime.shutdown","status":"ok","data":{"message":"Sledteam shutdown request sent."}}"#,
+            )
+            .unwrap();
+
+        assert_eq!(response.origin, origin);
+        assert_eq!(response.lines, ["Shutting down Sledteam…"]);
+        assert!(pending.origins().is_empty());
+    }
+
+    #[test]
+    fn shutdown_error_uses_generic_structured_error_message() {
+        let pending = PendingRequests::default();
+        pending.record(channel("irc", "#camp"), "shutdown sledteam");
+
+        let response = pending
+            .consume(
+                "irc",
+                NICK,
+                r#"{"schema_version":1,"command":"runtime.shutdown","status":"error","error":{"code":"shutdown_request_failed","message":"Could not contact the runtime."}}"#,
+            )
+            .unwrap();
+
+        assert_eq!(
+            response.lines,
+            ["Sledteam runtime.shutdown: Could not contact the runtime. (shutdown_request_failed)"]
+        );
+        assert!(pending.origins().is_empty());
     }
 
     #[test]
