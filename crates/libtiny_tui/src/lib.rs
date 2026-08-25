@@ -254,6 +254,11 @@ impl TUI {
     delegate!(new_server_tab(serv_name: &str, alias: Option<String>,));
     delegate!(close_server_tab(serv_name: &str,));
     delegate!(new_chan_tab(serv_name: &str, chan: &ChanNameRef,));
+    delegate!(new_chan_tab_with_alias(
+        serv_name: &str,
+        chan: &ChanNameRef,
+        alias: Option<String>,
+    ));
     delegate!(focus_chan_tab(serv_name: &str, chan: &ChanNameRef,));
     delegate!(close_chan_tab(serv_name: &str, chan: &ChanNameRef,));
     delegate!(close_user_tab(serv_name: &str, nick: &str,));
@@ -271,12 +276,29 @@ impl TUI {
         highlight: bool,
         is_action: bool,
     ));
+    delegate!(add_privmsg_with_channel_label(
+        sender: &str,
+        msg: &str,
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+        is_action: bool,
+        channel_label: Option<&str>,
+    ));
     delegate!(add_multiline_privmsg(
         sender: &str,
         lines: &[String],
         ts: Tm,
         target: &MsgTarget,
         highlight: bool,
+    ));
+    delegate!(add_multiline_privmsg_with_channel_label(
+        sender: &str,
+        lines: &[String],
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+        channel_label: Option<&str>,
     ));
     delegate!(add_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));
     delegate!(remove_nick(nick: &str, ts: Option<Tm>, target: &MsgTarget,));

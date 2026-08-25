@@ -78,7 +78,11 @@ where
         let rcv_input_ev = ReceiverStream::new(rcv_input_ev);
         let (tui, rcv_tui_ev) = TUI::run_test(width, height, rcv_input_ev.map(Ok));
 
-        let tiny_ui = UI::new(tui.clone(), None);
+        let tiny_ui = UI::new(
+            tui.clone(),
+            None,
+            crate::sledteam_session::SledteamSession::default(),
+        );
 
         // Create test connection event channel
         let (snd_conn_ev, rcv_conn_ev) = mpsc::channel::<client::Event>(100);
@@ -117,7 +121,7 @@ fn incoming_multiline_event_uses_one_sender_header() {
              snd_conn_ev,
              ..
          }| async move {
-            let chan = ChanName::new("#camp".to_owned());
+            let chan = ChanName::new("#01J00000000000000000000000".to_owned());
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
                     tags: Vec::new(),
@@ -169,7 +173,7 @@ fn test_own_join_focuses_channel_tab() {
              snd_conn_ev,
              ..
          }| async move {
-            let chan = ChanName::new("#camp".to_owned());
+            let chan = ChanName::new("#01J00000000000000000000000".to_owned());
             let join = Msg {
                 tags: Vec::new(),
                 pfx: Some(Pfx::User {

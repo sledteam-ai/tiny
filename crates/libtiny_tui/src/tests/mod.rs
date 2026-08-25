@@ -1,6 +1,6 @@
 use std::panic::Location;
 
-use libtiny_common::{ChanNameRef, MsgSource, MsgTarget};
+use libtiny_common::{ChanName, ChanNameRef, MsgSource, MsgTarget};
 use term_input::{Event, Key};
 use termbox_simple::TB_BOLD;
 
@@ -325,15 +325,55 @@ fn hidden_mentions_tab_still_receives_messages() {
     let mut tui = single_line_tui(20, 4);
     let target = MsgTarget::Server { serv: "mentions" };
 
-    tui.add_msg("osa1 in x.y.z:#camp: hello", time::empty_tm(), &target);
+    tui.add_msg("osa1 in x.y.z:#tiny: hello", time::empty_tm(), &target);
 
     let lines = tui.tab_lines_text(&target).unwrap();
     assert!(lines.iter().any(|line| line.contains("Any mentions")));
     assert!(
         lines
             .iter()
-            .any(|line| line.contains("osa1 in x.y.z:#camp: hello"))
+            .any(|line| line.contains("osa1 in x.y.z:#tiny: hello"))
     );
+}
+
+#[test]
+fn channel_alias_changes_presentation_without_changing_source_identity() {
+    let mut tui = single_line_tui(70, 4);
+    let server = "sled.local";
+    let canonical = ChanName::new("#01J00000000000000000000000".to_owned());
+    tui.new_server_tab(server, None);
+    tui.new_chan_tab_with_alias(server, &canonical, Some("camp".to_owned()));
+    tui.focus_chan_tab(server, &canonical);
+    tui.draw();
+
+    assert!(crate::test_utils::buffer_str(&tui.get_front_buffer(), 70, 4).contains("camp"));
+    assert_eq!(
+        tui.current_tab(),
+        &MsgSource::Chan {
+            serv: server.to_owned(),
+            chan: canonical,
+        }
+    );
+}
+
+#[test]
+fn switch_accepts_unique_labels_and_canonical_channels_but_not_ambiguous_labels() {
+    let mut tui = single_line_tui(100, 4);
+    let server = "sled.local";
+    let trail = ChanName::new("#01J00000000000000000000000".to_owned());
+    let span_a = ChanName::new("#01J00000000000000000000001".to_owned());
+    let span_b = ChanName::new("#01J00000000000000000000002".to_owned());
+    tui.new_server_tab(server, None);
+    tui.new_chan_tab_with_alias(server, &trail, Some("Pack sled".to_owned()));
+    tui.new_chan_tab_with_alias(server, &span_a, Some("build".to_owned()));
+    tui.new_chan_tab_with_alias(server, &span_b, Some("build".to_owned()));
+
+    tui.switch("Pack sled");
+    assert!(matches!(tui.current_tab(), MsgSource::Chan { chan, .. } if chan == &trail));
+    tui.switch("build");
+    assert!(matches!(tui.current_tab(), MsgSource::Chan { chan, .. } if chan == &trail));
+    tui.switch(span_b.display());
+    assert!(matches!(tui.current_tab(), MsgSource::Chan { chan, .. } if chan == &span_b));
 }
 
 #[test]

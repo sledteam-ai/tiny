@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn shutdown_acknowledgement_uses_runtime_command_and_local_message() {
         let pending = PendingRequests::default();
-        let origin = channel("irc", "#camp");
+        let origin = channel("irc", "#01J00000000000000000000000");
         pending.record(origin.clone(), "shutdown sledteam");
 
         let response = pending
@@ -375,7 +375,10 @@ mod tests {
     #[test]
     fn shutdown_error_uses_generic_structured_error_message() {
         let pending = PendingRequests::default();
-        pending.record(channel("irc", "#camp"), "shutdown sledteam");
+        pending.record(
+            channel("irc", "#01J00000000000000000000000"),
+            "shutdown sledteam",
+        );
 
         let response = pending
             .consume(
@@ -395,7 +398,7 @@ mod tests {
     #[test]
     fn leaves_unrecognized_messages_and_senders_alone() {
         let pending = PendingRequests::default();
-        let origin = channel("irc", "#camp");
+        let origin = channel("irc", "#01J00000000000000000000000");
         pending.record(origin.clone(), "ets");
 
         assert!(pending.consume("irc", "alice", "hello").is_none());
@@ -415,7 +418,10 @@ mod tests {
     #[test]
     fn addressed_request_supplies_the_local_label_without_a_slash() {
         let pending = PendingRequests::default();
-        pending.record(channel("irc", "#camp"), "/span list Beta");
+        pending.record(
+            channel("irc", "#01J00000000000000000000000"),
+            "/span list Beta",
+        );
 
         let response = pending
             .consume(

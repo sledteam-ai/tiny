@@ -56,6 +56,7 @@ impl Notifier {
         target: &MsgTarget,
         our_nick: &str,
         mention: bool,
+        channel_label: Option<&str>,
     ) {
         if our_nick == sender {
             return;
@@ -66,7 +67,10 @@ impl Notifier {
         match *target {
             MsgTarget::Chan { chan, .. } => {
                 if *self == Notifier::Messages || (*self == Notifier::Mentions && mention) {
-                    notify(&format!("{} in {}", sender, chan.display()), &msg)
+                    notify(
+                        &format!("{} in {}", sender, channel_name(chan, channel_label)),
+                        &msg,
+                    )
                 }
             }
             MsgTarget::User {
@@ -80,4 +84,21 @@ impl Notifier {
             _ => {}
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libtiny_common::ChanName;
+
+    #[test]
+    fn notification_channel_name_prefers_supplied_presentation_label() {
+        let channel = ChanName::new("#01J00000000000000000000000".to_owned());
+        assert_eq!(channel_name(&channel, Some("camp")), "camp");
+        assert_eq!(channel_name(&channel, None), channel.display());
+    }
+}
+
+fn channel_name<'a>(channel: &'a libtiny_common::ChanNameRef, label: Option<&'a str>) -> &'a str {
+    label.unwrap_or_else(|| channel.display())
 }

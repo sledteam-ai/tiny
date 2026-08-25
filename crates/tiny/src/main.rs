@@ -6,6 +6,7 @@ mod config;
 mod conn;
 mod debug_logging;
 mod sledserv;
+mod sledteam_session;
 mod ui;
 mod utils;
 
@@ -28,7 +29,19 @@ fn main() {
     let cli::Args {
         servers: server_args,
         config_path,
+        sledteam_session,
     } = cli::parse();
+    let sledteam_session = match sledteam_session
+        .as_deref()
+        .map(sledteam_session::SledteamSession::parse)
+        .transpose()
+    {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("{error}");
+            exit(1);
+        }
+    };
     let config_path = config_path.unwrap_or_else(config::get_config_path);
     if config_path.is_dir() {
         println!("The config path is a directory.");
@@ -84,7 +97,7 @@ fn main() {
                 } else {
                     servers
                 };
-                run(servers, defaults, config_path, log_dir)
+                run(servers, defaults, config_path, log_dir, sledteam_session)
             }
         }
     }
@@ -97,6 +110,7 @@ fn run(
     defaults: config::Defaults,
     config_path: PathBuf,
     log_dir: Option<PathBuf>,
+    sledteam_session: Option<sledteam_session::SledteamSession>,
 ) {
     let debug_log_file = match log_dir.as_ref() {
         Some(log_dir) => {
@@ -150,7 +164,7 @@ fn run(
                 }
             });
 
-        let tui = UI::new(tui, logger);
+        let tui = UI::new(tui, logger, sledteam_session.clone().unwrap_or_default());
 
         let mut clients: Vec<Client> = Vec::with_capacity(servers.len());
 
@@ -180,7 +194,7 @@ fn run(
                 user: server.user,
                 realname: server.realname,
                 nicks: server.nicks,
-                auto_join: server.join.iter().map(|c| c.name().to_owned()).collect(),
+                auto_join: session_autojoin(&server.join, sledteam_session.as_ref()),
                 nickserv_ident: server.nickserv_ident,
                 sasl_auth,
             };
@@ -201,4 +215,44 @@ fn run(
     });
 
     runtime.block_on(local);
+}
+
+fn session_autojoin(
+    configured: &[libtiny_tui::config::Chan],
+    session: Option<&sledteam_session::SledteamSession>,
+) -> Vec<libtiny_common::ChanName> {
+    session
+        .map(sledteam_session::SledteamSession::channels)
+        .unwrap_or_else(|| {
+            configured
+                .iter()
+                .map(|channel| channel.name().to_owned())
+                .collect()
+        })
+}
+
+#[cfg(test)]
+mod sledteam_launch_tests {
+    use super::*;
+
+    #[test]
+    fn session_canonical_channels_replace_configured_autojoin() {
+        let configured = vec![libtiny_tui::config::Chan::Name(
+            libtiny_common::ChanName::new("#legacy".to_owned()),
+        )];
+        let session = sledteam_session::SledteamSession::parse(
+            r##"{"schema_version":1,"terrain":[{"channel":"#01J00000000000000000000000","kind":"expedition","label":"camp"},{"channel":"#01J00000000000000000000001","kind":"trail","label":"Pack sled"}]}"##,
+        )
+        .unwrap();
+
+        let channels = session_autojoin(&configured, Some(&session));
+        assert_eq!(
+            channels
+                .iter()
+                .map(|channel| channel.display())
+                .collect::<Vec<_>>(),
+            ["#01J00000000000000000000000", "#01J00000000000000000000001"]
+        );
+        assert!(!channels.iter().any(|channel| channel.display() == "#camp"));
+    }
 }

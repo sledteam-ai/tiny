@@ -147,6 +147,19 @@ server by passing `libera` as a command line argument.
 
 You can use `--config <path>` to specify your config file location.
 
+### Sledteam launch sessions
+
+The Sledteam fork also accepts `--sledteam-session <JSON>`. Sled supplies this
+argument at launch with a snapshot of the current Expedition, Trail, and Spans.
+The snapshot's channel fields are canonical IRC identities in `#<ULID>` form;
+Tiny uses those unchanged for autojoin, routing, outgoing messages, and logs.
+Its labels are presentation-only: the Expedition appears as `camp`, and Trail
+and Span tabs use their supplied names. Friendly labels also apply to
+`/switch`, Mentions entries, and desktop notification summaries.
+
+The snapshot is not a live state feed. Tiny does not refresh memberships or
+labels after launch, and Sled has no ongoing posture role in this tranche.
+
 ## Key bindings
 
 Key bindings can be configured in the config file, see the [wiki

@@ -492,11 +492,20 @@ impl TUI {
 
     /// Returns index of the new tab if a new tab is created.
     pub(crate) fn new_chan_tab(&mut self, serv: &str, chan: &ChanNameRef) -> Option<usize> {
+        self.new_chan_tab_with_alias(serv, chan, None)
+    }
+
+    pub(crate) fn new_chan_tab_with_alias(
+        &mut self,
+        serv: &str,
+        chan: &ChanNameRef,
+        alias: Option<String>,
+    ) -> Option<usize> {
         match self.find_chan_tab_idx(serv, chan) {
             None => match self.find_last_serv_tab_idx(serv) {
                 None => {
                     self.new_server_tab(serv, None);
-                    self.new_chan_tab(serv, chan)
+                    self.new_chan_tab_with_alias(serv, chan, alias)
                 }
                 Some(serv_tab_idx) => {
                     let tab_idx = serv_tab_idx + 1;
@@ -506,7 +515,7 @@ impl TUI {
                             serv: serv.to_owned(),
                             chan: chan.to_owned(),
                         },
-                        None,
+                        alias,
                     );
                     if self.active_idx >= tab_idx {
                         self.next_tab();
@@ -977,6 +986,36 @@ impl TUI {
     }
 
     pub(crate) fn switch(&mut self, string: &str) {
+        let exact_source = self.tabs.iter().enumerate().find_map(|(idx, tab)| {
+            tab.is_visible()
+                .then_some((idx, &tab.src))
+                .filter(|(_, source)| match source {
+                    MsgSource::Serv { serv } => *serv == string,
+                    MsgSource::Chan { chan, .. } => chan.display() == string,
+                    MsgSource::User { nick, .. } => *nick == string,
+                })
+                .map(|(idx, _)| idx)
+        });
+        if let Some(idx) = exact_source {
+            self.select_tab(idx);
+            return;
+        }
+
+        let exact_visible = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.is_visible() && tab.visible_name() == string)
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+        if let [idx] = exact_visible.as_slice() {
+            self.select_tab(*idx);
+            return;
+        }
+        if exact_visible.len() > 1 {
+            return;
+        }
+
         let mut next_idx = self.active_idx;
         for (tab_idx, tab) in self.tabs.iter().enumerate() {
             if !tab.is_visible() {
@@ -991,7 +1030,7 @@ impl TUI {
                 }
                 MsgSource::Chan { ref chan, .. } => {
                     // TODO: Case sensitive matching here is not ideal
-                    if chan.display().contains(string) {
+                    if chan.display().contains(string) || tab.visible_name().contains(string) {
                         next_idx = tab_idx;
                         break;
                     }
@@ -1278,6 +1317,19 @@ impl TUI {
         highlight: bool,
         is_action: bool,
     ) {
+        self.add_privmsg_with_channel_label(sender, msg, ts, target, highlight, is_action, None)
+    }
+
+    pub(crate) fn add_privmsg_with_channel_label(
+        &mut self,
+        sender: &str,
+        msg: &str,
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+        is_action: bool,
+        channel_label: Option<&str>,
+    ) {
         // Embedded newlines belong to this one logical message; separate add_privmsg calls must
         // remain separate even when their sender and timestamp match.
         if !is_action && msg.contains('\n') {
@@ -1298,7 +1350,7 @@ impl TUI {
                 .add_privmsg(sender, msg, Timestamp::from(ts), highlight, is_action);
             let nick = tab.widget.get_nick();
             if let Some(nick_) = nick {
-                notifier.notify_privmsg(sender, msg, target, &nick_, highlight);
+                notifier.notify_privmsg(sender, msg, target, &nick_, highlight, channel_label);
             }
         });
     }
@@ -1310,6 +1362,18 @@ impl TUI {
         ts: Tm,
         target: &MsgTarget,
         highlight: bool,
+    ) {
+        self.add_multiline_privmsg_with_channel_label(sender, lines, ts, target, highlight, None)
+    }
+
+    pub(crate) fn add_multiline_privmsg_with_channel_label(
+        &mut self,
+        sender: &str,
+        lines: &[String],
+        ts: Tm,
+        target: &MsgTarget,
+        highlight: bool,
+        channel_label: Option<&str>,
     ) {
         let mut notifier = if let Some(serv) = target.serv_name() {
             self.get_tab_config(serv, target.chan_or_user_name())
@@ -1323,7 +1387,7 @@ impl TUI {
                 .add_multiline_privmsg(sender, lines, Timestamp::from(ts), highlight);
             if let Some(nick) = tab.widget.get_nick() {
                 for line in lines {
-                    notifier.notify_privmsg(sender, line, target, &nick, highlight);
+                    notifier.notify_privmsg(sender, line, target, &nick, highlight, channel_label);
                 }
             }
         });

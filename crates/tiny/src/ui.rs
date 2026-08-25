@@ -3,6 +3,7 @@
 use crate::cmd::run_cmd;
 use crate::config;
 use crate::sledserv::PendingRequests;
+use crate::sledteam_session::SledteamSession;
 use libtiny_client::Client;
 use libtiny_common::{ChanNameRef, MsgSource, MsgTarget, TabStyle};
 use libtiny_logger::Logger;
@@ -43,15 +44,17 @@ pub(crate) struct UI {
     logger: Option<Logger>,
     sledserv_requests: PendingRequests,
     intentional_shutdowns: Rc<RefCell<HashSet<String>>>,
+    sledteam_session: SledteamSession,
 }
 
 impl UI {
-    pub(crate) fn new(ui: TUI, logger: Option<Logger>) -> UI {
+    pub(crate) fn new(ui: TUI, logger: Option<Logger>, sledteam_session: SledteamSession) -> UI {
         UI {
             ui,
             logger,
             sledserv_requests: PendingRequests::default(),
             intentional_shutdowns: Rc::new(RefCell::new(HashSet::new())),
+            sledteam_session,
         }
     }
 
@@ -63,20 +66,47 @@ impl UI {
     }
 
     delegate!(close_server_tab(serv: &str,));
-    delegate!(new_chan_tab(serv: &str, chan: &ChanNameRef,));
+    pub(crate) fn new_chan_tab(&self, serv: &str, chan: &ChanNameRef) {
+        self.ui.new_chan_tab_with_alias(
+            serv,
+            chan,
+            Some(self.sledteam_session.display_channel(chan).to_owned()),
+        );
+        if let Some(logger) = &self.logger {
+            logger.new_chan_tab(serv, chan);
+        }
+    }
     delegate_ui!(focus_chan_tab(serv: &str, chan: &ChanNameRef,));
     delegate!(close_chan_tab(serv: &str, chan: &ChanNameRef,));
     delegate!(close_user_tab(serv: &str, nick: &str,));
     delegate!(add_client_msg(msg: &str, target: &MsgTarget,));
     delegate!(add_msg(msg: &str, ts: Tm, target: &MsgTarget,));
-    delegate!(add_privmsg(
+    pub(crate) fn add_privmsg(
+        &self,
         sender: &str,
         msg: &str,
         ts: Tm,
         target: &MsgTarget,
         highlight: bool,
         is_action: bool,
-    ));
+    ) {
+        let channel_label = match target {
+            MsgTarget::Chan { chan, .. } => Some(self.sledteam_session.display_channel(chan)),
+            _ => None,
+        };
+        self.ui.add_privmsg_with_channel_label(
+            sender,
+            msg,
+            ts,
+            target,
+            highlight,
+            is_action,
+            channel_label,
+        );
+        if let Some(logger) = &self.logger {
+            logger.add_privmsg(sender, msg, ts, target, highlight, is_action);
+        }
+    }
 
     pub(crate) fn add_multiline_privmsg(
         &self,
@@ -86,8 +116,18 @@ impl UI {
         target: &MsgTarget,
         highlight: bool,
     ) {
-        self.ui
-            .add_multiline_privmsg(sender, lines, ts, target, highlight);
+        let channel_label = match target {
+            MsgTarget::Chan { chan, .. } => Some(self.sledteam_session.display_channel(chan)),
+            _ => None,
+        };
+        self.ui.add_multiline_privmsg_with_channel_label(
+            sender,
+            lines,
+            ts,
+            target,
+            highlight,
+            channel_label,
+        );
         if let Some(logger) = &self.logger {
             for line in lines {
                 logger.add_privmsg(sender, line, ts, target, highlight, false);
@@ -125,6 +165,10 @@ impl UI {
 
     pub(crate) fn current_tab(&self) -> Option<MsgSource> {
         self.ui.current_tab()
+    }
+
+    pub(crate) fn display_channel<'a>(&'a self, channel: &'a ChanNameRef) -> &'a str {
+        self.sledteam_session.display_channel(channel)
     }
 
     pub(crate) fn record_sledserv_request(&self, origin: MsgSource, command: &str) {
@@ -347,7 +391,7 @@ mod tests {
         local.block_on(&runtime, async {
             let (_snd_input, rcv_input) = mpsc::channel(1);
             let (tui, _tui_events) = TUI::run_test(40, 5, ReceiverStream::new(rcv_input).map(Ok));
-            let ui = UI::new(tui, None);
+            let ui = UI::new(tui, None, SledteamSession::default());
             let defaults = config::Defaults {
                 nicks: vec!["tiny-test".to_owned()],
                 realname: "Tiny test".to_owned(),

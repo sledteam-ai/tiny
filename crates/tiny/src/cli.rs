@@ -11,12 +11,16 @@ pub(crate) struct Args {
     /// Path to the config file. When not specified `config::get_config_path` is used to find the
     /// config file.
     pub(crate) config_path: Option<PathBuf>,
+
+    /// One-launch Sledteam terrain snapshot encoded as JSON.
+    pub(crate) sledteam_session: Option<String>,
 }
 
 /// Parses command line arguments and handles `--version` and `--help`.
 pub(crate) fn parse() -> Args {
     let mut servers: Vec<String> = Vec::new();
     let mut config_path: Option<PathBuf> = None;
+    let mut sledteam_session: Option<String> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -48,6 +52,19 @@ pub(crate) fn parse() -> Args {
             }
         }
 
+        if arg == "--sledteam-session" {
+            match args.next() {
+                Some(snapshot) => {
+                    sledteam_session = Some(snapshot);
+                    continue;
+                }
+                None => {
+                    eprintln!("Error: The argument '--sledteam-session <JSON>' requires a value");
+                    std::process::exit(1);
+                }
+            }
+        }
+
         if arg.starts_with('-') {
             eprintln!("Error: Found argument '{arg}' which wasn't expected");
             eprintln!();
@@ -61,6 +78,7 @@ pub(crate) fn parse() -> Args {
     Args {
         servers,
         config_path,
+        sledteam_session,
     }
 }
 
@@ -87,7 +105,8 @@ ARGS:
                     names contain \"foo\" OR \"bar\".
 
 OPTIONS:
-    -c, --config <FILE>    Use this config file
+    -c, --config <FILE>           Use this config file
+        --sledteam-session <JSON> Use one launch-time Sledteam terrain snapshot
     -h, --help             Print help information
     -V, --version          Print version information",
     )

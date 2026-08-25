@@ -725,7 +725,11 @@ fn test_help_commands_are_local_and_grouped_by_ownership() {
             let (snd_input, rcv_input) = mpsc::channel(1);
             let input = ReceiverStream::new(rcv_input).map(Ok);
             let (tui, _tui_events) = TUI::run_test(160, 60, input);
-            let ui = UI::new(tui.clone(), None);
+            let ui = UI::new(
+                tui.clone(),
+                None,
+                crate::sledteam_session::SledteamSession::default(),
+            );
             ui.new_server_tab("test-server", None);
 
             run_cmd(
@@ -830,7 +834,11 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
         let (snd_input, rcv_input) = mpsc::channel(1);
         let input = ReceiverStream::new(rcv_input).map(Ok);
         let (tui, _tui_events) = TUI::run_test(40, 5, input);
-        let ui = UI::new(tui.clone(), None);
+        let ui = UI::new(
+            tui.clone(),
+            None,
+            crate::sledteam_session::SledteamSession::default(),
+        );
         ui.new_server_tab("127.0.0.1", None);
         let chan = ChanName::new("#current-channel".to_owned());
         ui.new_chan_tab("127.0.0.1", &chan);

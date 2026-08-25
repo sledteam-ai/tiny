@@ -242,7 +242,13 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
                         ui.set_tab_style(TabStyle::Highlight, &ui_msg_target);
                         let mentions_target = MsgTarget::Server { serv: "mentions" };
                         ui.add_msg(
-                            &format!("{} in {}:{}: {}", sender, serv, chan.display(), msg),
+                            &format!(
+                                "{} in {}:{}: {}",
+                                sender,
+                                serv,
+                                ui.display_channel(&chan),
+                                msg
+                            ),
                             ts,
                             &mentions_target,
                         );
