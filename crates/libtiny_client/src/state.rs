@@ -945,6 +945,26 @@ mod tests {
     }
 
     #[test]
+    fn auto_join_emits_channel_parameter_after_end_of_motd() {
+        let mut info = server_info();
+        info.auto_join = vec![ChanName::new("#01M0V5JMEVT2VBP36T2JNZYZ4W".to_owned())];
+        let state = State::new(info);
+        let end_of_motd = Msg {
+            tags: Vec::new(),
+            pfx: Some(Pfx::Server("irc.example".to_owned())),
+            cmd: wire::Cmd::Reply {
+                num: 376,
+                params: vec!["tiny".to_owned(), "End of MOTD".to_owned()],
+            },
+        };
+
+        assert_eq!(
+            update_and_drain(&state, end_of_motd),
+            vec!["JOIN #01M0V5JMEVT2VBP36T2JNZYZ4W\r\n".to_owned()]
+        );
+    }
+
+    #[test]
     fn cap_ls_req_ack_negotiates_multiline_and_ends() {
         let state = State::new(server_info());
         assert!(update_and_drain(&state, cap("LS", true, &["batch"])).is_empty());
