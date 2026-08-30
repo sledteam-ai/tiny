@@ -3,6 +3,60 @@ use libtiny_common::{ChanName, ChanNameRef};
 use crate::config::*;
 use crate::notifier::Notifier;
 
+fn config_with(extra: &str) -> Result<Config, serde_yaml::Error> {
+    serde_yaml::from_str(&format!("servers: []\ndefaults: {{}}\n{extra}"))
+}
+
+#[test]
+fn dark_theme_resolves_to_complete_dark_palette() {
+    let config = config_with("theme: dark\n").expect("dark theme should parse");
+
+    assert_eq!(config.colors, Colors::dark());
+    assert_eq!(config.colors.user_msg, Style { fg: 252, bg: 234 });
+    assert_eq!(config.colors.timestamp, Style { fg: 244, bg: 234 });
+    assert_eq!(config.colors.tab_active.bg, 24);
+    assert_eq!(config.colors.err_msg.bg, 124);
+}
+
+#[test]
+fn light_theme_resolves_to_complete_light_palette() {
+    let config = config_with("theme: light\n").expect("light theme should parse");
+
+    assert_eq!(config.colors, Colors::light());
+    assert_eq!(config.colors.clear, Style { fg: 233, bg: 230 });
+    assert_eq!(config.colors.user_msg, Style { fg: 233, bg: 230 });
+    assert_eq!(config.colors.cursor, Style { fg: 230, bg: 24 });
+    assert_eq!(config.colors.timestamp, Style { fg: 101, bg: 230 });
+    assert_eq!(config.colors.tab_active.bg, 24);
+    assert_eq!(config.colors.err_msg.bg, 124);
+    assert_ne!(config.colors, Colors::dark());
+}
+
+#[test]
+fn omitted_theme_defaults_to_dark() {
+    let config = config_with("").expect("config without theme should parse");
+
+    assert_eq!(config.colors, Colors::dark());
+}
+
+#[test]
+fn invalid_theme_has_a_clear_config_error() {
+    let error = config_with("theme: dusk\n").expect_err("unknown theme should fail");
+    let message = error.to_string();
+
+    assert!(message.contains("unknown variant `dusk`"), "{message}");
+    assert!(message.contains("`dark` or `light`"), "{message}");
+}
+
+#[test]
+fn colors_override_the_selected_theme() {
+    let config = config_with("theme: light\ncolors:\n  timestamp:\n    fg: red\n    bg: white\n")
+        .expect("color override should parse");
+
+    assert_eq!(config.colors.timestamp, Style { fg: 9, bg: 15 });
+    assert_eq!(config.colors.user_msg, Colors::light().user_msg);
+}
+
 #[test]
 fn parsing_tab_configs() {
     let config_str = r##"

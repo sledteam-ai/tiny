@@ -101,6 +101,24 @@ When a config file is not found in one of these locations tiny creates one in
 the first path above with defaults and exits, printing path to the config file.
 Edit that file before re-running tiny to change the defaults.
 
+Tiny provides two complete 256-color palettes, selected with `theme: dark` or
+`theme: light`. The theme defaults to `dark` when omitted. Custom `colors:`
+entries are applied on top of the selected theme, so a config can override only
+the palette fields it needs:
+
+```yaml
+# Available themes: light or dark
+theme: dark
+
+colors:
+  timestamp:
+    fg: gray
+    bg: black
+```
+
+Any theme name other than `dark` or `light` is a configuration error. See the
+generated config for the accepted color names and text attributes.
+
 **A note on nick identification:** Some IRC servers such as ircd-seven (used by
 Freenode) and InspIRCd (used by Mozilla) support identification via the `PASS`
 command. This way of identification (rather than sending a message to a service

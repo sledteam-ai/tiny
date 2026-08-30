@@ -84,101 +84,25 @@ log_dir: "{}"
 # Nick length in 'aligned' layout. Default is 12.
 # max_nick_length: 12
 
-# Color theme based on 256 colors. Colors can be defined as color indices
-# (0-255) or with their names.
-#
-# Below are the defaults. You can delete them if you don't want to change any
-# colors.
+# Available themes: light or dark
+theme: dark
+
+# The selected theme supplies every Tiny color. Individual values can still be
+# overridden under `colors`. Colors can be indices (0-255) or names.
 #
 # Accepted color names are:
 # default (0), black (0), maroon (1), green (2), olive (3), navy (4),
 # purple (5), teal (6), silver (7), gray (8), red (9), lime (10),
 # yellow (11), blue (12), magenta (13), cyan (14), white (15)
 #
-# Attributes can be combined (e.g [bold, underline]). valid values are: bold,
+# Attributes can be combined (e.g. [bold, underline]). Valid values are: bold,
 # underline, italic, strikethrough.
-colors:
-    nick: [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
-
-    clear:
-        fg: default
-        bg: default
-
-    user_msg:
-        fg: black
-        bg: default
-
-    err_msg:
-        fg: black
-        bg: maroon
-        attrs: [bold]
-
-    topic:
-        fg: cyan
-        bg: default
-        attrs: [bold]
-
-    cursor:
-        fg: black
-        bg: default
-
-    join:
-        fg: lime
-        bg: default
-        attrs: [bold]
-
-    part:
-        fg: maroon
-        bg: default
-        attrs: [bold]
-
-    nick_change:
-        fg: lime
-        bg: default
-        attrs: [bold]
-
-    faded:
-        fg: 242
-        bg: default
-
-    exit_dialogue:
-        fg: default
-        bg: navy
-
-    highlight:
-        fg: red
-        bg: default
-        attrs: [bold]
-
-    completion:
-        fg: 84
-        bg: default
-
-    timestamp:
-        fg: 242
-        bg: default
-
-    tab_active:
-        fg: default
-        bg: default
-        attrs: [bold]
-
-    tab_normal:
-        fg: gray
-        bg: default
-
-    tab_new_msg:
-        fg: purple
-        bg: default
-
-    tab_highlight:
-        fg: red
-        bg: default
-        attrs: [bold]
-
-    tab_joinpart:
-        fg: 11
-        bg: default
+#
+# Example override (all other values still come from `theme`):
+# colors:
+#     timestamp:
+#         fg: gray
+#         bg: black
 
 # Custom key mappings. Syntax is:
 #

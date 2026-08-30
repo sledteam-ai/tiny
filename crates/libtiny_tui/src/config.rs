@@ -12,25 +12,78 @@ use termbox_simple::*;
 use crate::key_map::KeyMap;
 use crate::notifier::Notifier;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug)]
 pub(crate) struct Config {
     pub(crate) servers: Vec<Server>,
 
     pub(crate) defaults: Defaults,
 
-    #[serde(default)]
     pub(crate) colors: Colors,
 
-    #[serde(default = "usize::max_value")]
     pub(crate) scrollback: usize,
 
     pub(crate) layout: Option<Layout>,
 
-    #[serde(default = "default_max_nick_length")]
     pub(crate) max_nick_length: usize,
 
-    #[serde(default)]
     pub(crate) key_map: Option<KeyMap>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawConfig {
+    servers: Vec<Server>,
+    defaults: Defaults,
+    #[serde(default)]
+    theme: Theme,
+    #[serde(default)]
+    colors: ColorsOverride,
+    #[serde(default = "usize::max_value")]
+    scrollback: usize,
+    layout: Option<Layout>,
+    #[serde(default = "default_max_nick_length")]
+    max_nick_length: usize,
+    #[serde(default)]
+    key_map: Option<KeyMap>,
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RawConfig::deserialize(deserializer)?;
+        Ok(Config {
+            servers: raw.servers,
+            defaults: raw.defaults,
+            colors: raw.colors.apply(Colors::for_theme(raw.theme)),
+            scrollback: raw.scrollback,
+            layout: raw.layout,
+            max_nick_length: raw.max_nick_length,
+            key_map: raw.key_map,
+        })
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            servers: Vec::new(),
+            defaults: Defaults::default(),
+            colors: Colors::default(),
+            scrollback: usize::MAX,
+            layout: None,
+            max_nick_length: default_max_nick_length(),
+            key_map: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -257,8 +310,7 @@ pub(crate) enum Layout {
     Aligned,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(default)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Colors {
     pub nick: Vec<u8>,
     pub clear: Style,
@@ -281,70 +333,156 @@ pub struct Colors {
     pub tab_joinpart: Style,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct ColorsOverride {
+    nick: Option<Vec<u8>>,
+    clear: Option<Style>,
+    user_msg: Option<Style>,
+    err_msg: Option<Style>,
+    topic: Option<Style>,
+    cursor: Option<Style>,
+    join: Option<Style>,
+    part: Option<Style>,
+    nick_change: Option<Style>,
+    faded: Option<Style>,
+    exit_dialogue: Option<Style>,
+    highlight: Option<Style>,
+    completion: Option<Style>,
+    timestamp: Option<Style>,
+    tab_active: Option<Style>,
+    tab_normal: Option<Style>,
+    tab_new_msg: Option<Style>,
+    tab_highlight: Option<Style>,
+    tab_joinpart: Option<Style>,
+}
+
+impl ColorsOverride {
+    fn apply(self, mut colors: Colors) -> Colors {
+        macro_rules! apply {
+            ($($field:ident),+ $(,)?) => {
+                $(if let Some(value) = self.$field { colors.$field = value; })+
+            };
+        }
+        apply!(
+            nick,
+            clear,
+            user_msg,
+            err_msg,
+            topic,
+            cursor,
+            join,
+            part,
+            nick_change,
+            faded,
+            exit_dialogue,
+            highlight,
+            completion,
+            timestamp,
+            tab_active,
+            tab_normal,
+            tab_new_msg,
+            tab_highlight,
+            tab_joinpart,
+        );
+        colors
+    }
+}
+
 impl Default for Colors {
     fn default() -> Self {
+        Self::for_theme(Theme::Dark)
+    }
+}
+
+impl Colors {
+    fn for_theme(theme: Theme) -> Self {
+        match theme {
+            Theme::Dark => Self::dark(),
+            Theme::Light => Self::light(),
+        }
+    }
+
+    pub(crate) fn dark() -> Self {
         Colors {
-            nick: vec![1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
-            clear: Style {
-                fg: TB_DEFAULT,
-                bg: TB_DEFAULT,
+            nick: vec![109, 110, 114, 139, 145, 151, 173, 179, 180, 181, 186, 216],
+            clear: Style { fg: 252, bg: 234 },
+            user_msg: Style { fg: 252, bg: 234 },
+            err_msg: Style {
+                fg: 231 | TB_BOLD,
+                bg: 124,
             },
-            user_msg: Style {
-                fg: 0,
-                bg: TB_DEFAULT,
-            },
-            err_msg: Style { fg: TB_BOLD, bg: 1 },
             topic: Style {
-                fg: 14 | TB_BOLD,
-                bg: TB_DEFAULT,
+                fg: 117 | TB_BOLD,
+                bg: 234,
             },
-            cursor: Style {
-                fg: 0,
-                bg: TB_DEFAULT,
-            },
-            join: Style {
-                fg: 10 | TB_BOLD,
-                bg: TB_DEFAULT,
-            },
-            part: Style {
-                fg: 1 | TB_BOLD,
-                bg: TB_DEFAULT,
-            },
-            nick_change: Style {
-                fg: 10 | TB_BOLD,
-                bg: TB_DEFAULT,
-            },
-            faded: Style {
-                fg: 242,
-                bg: TB_DEFAULT,
-            },
-            exit_dialogue: Style {
-                fg: TB_DEFAULT,
-                bg: 4,
-            },
+            cursor: Style { fg: 234, bg: 252 },
+            join: Style { fg: 108, bg: 234 },
+            part: Style { fg: 174, bg: 234 },
+            nick_change: Style { fg: 110, bg: 234 },
+            faded: Style { fg: 244, bg: 234 },
+            exit_dialogue: Style { fg: 252, bg: 237 },
             highlight: Style {
-                fg: 9 | TB_BOLD,
-                bg: TB_DEFAULT,
+                fg: 203 | TB_BOLD,
+                bg: 234,
             },
-            completion: Style {
-                fg: 84,
-                bg: TB_DEFAULT,
+            completion: Style { fg: 151, bg: 234 },
+            timestamp: Style { fg: 244, bg: 234 },
+            tab_active: Style {
+                fg: 231 | TB_BOLD,
+                bg: 24,
             },
-            timestamp: Style {
-                fg: 242,
-                bg: TB_DEFAULT,
+            tab_normal: Style { fg: 245, bg: 234 },
+            tab_new_msg: Style {
+                fg: 151 | TB_BOLD,
+                bg: 234,
             },
-            tab_active: Style { fg: TB_BOLD, bg: 0 },
-            tab_normal: Style { fg: 8, bg: 0 },
-            tab_new_msg: Style { fg: 5, bg: 0 },
             tab_highlight: Style {
-                fg: 9 | TB_BOLD,
-                bg: 0,
+                fg: 203 | TB_BOLD,
+                bg: 234,
             },
-            tab_joinpart: Style {
-                fg: 11,
-                bg: TB_DEFAULT,
+            tab_joinpart: Style { fg: 244, bg: 234 },
+        }
+    }
+
+    pub(crate) fn light() -> Self {
+        Colors {
+            nick: vec![24, 25, 28, 52, 58, 60, 88, 94, 95, 100, 130, 131],
+            clear: Style { fg: 233, bg: 230 },
+            user_msg: Style { fg: 233, bg: 230 },
+            err_msg: Style {
+                fg: 230 | TB_BOLD,
+                bg: 124,
             },
+            topic: Style {
+                fg: 24 | TB_BOLD,
+                bg: 230,
+            },
+            cursor: Style { fg: 230, bg: 24 },
+            join: Style { fg: 28, bg: 230 },
+            part: Style { fg: 124, bg: 230 },
+            nick_change: Style { fg: 30, bg: 230 },
+            faded: Style { fg: 101, bg: 230 },
+            exit_dialogue: Style { fg: 233, bg: 223 },
+            highlight: Style {
+                fg: 124 | TB_BOLD,
+                bg: 230,
+            },
+            completion: Style { fg: 58, bg: 230 },
+            timestamp: Style { fg: 101, bg: 230 },
+            tab_active: Style {
+                fg: 230 | TB_BOLD,
+                bg: 24,
+            },
+            tab_normal: Style { fg: 240, bg: 230 },
+            tab_new_msg: Style {
+                fg: 58 | TB_BOLD,
+                bg: 230,
+            },
+            tab_highlight: Style {
+                fg: 124 | TB_BOLD,
+                bg: 230,
+            },
+            tab_joinpart: Style { fg: 101, bg: 230 },
         }
     }
 }
