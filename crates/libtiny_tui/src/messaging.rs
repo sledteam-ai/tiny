@@ -1,4 +1,4 @@
-use termbox_simple::{TB_BOLD, Termbox};
+use termbox_simple::Termbox;
 
 use std::convert::From;
 
@@ -23,12 +23,8 @@ pub(crate) struct MessagingUI {
     /// The single-line command and message field.
     input_field: InputArea,
 
-    composer: Composer,
-
-    input_focus: InputFocus,
-
-    #[cfg(test)]
-    legacy_single_line_layout: bool,
+    /// The transient auxiliary input pane. `None` means normal Tiny input mode.
+    composer: Option<Composer>,
 
     exit_dialogue: Option<ExitDialogue>,
 
@@ -95,12 +91,6 @@ struct ActivityLine {
     line_idx: usize,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum InputFocus {
-    SingleLine,
-    Composer,
-}
-
 impl MessagingUI {
     pub(crate) fn new(
         width: i32,
@@ -108,14 +98,12 @@ impl MessagingUI {
         scrollback: usize,
         msg_layout: Layout,
     ) -> MessagingUI {
-        let composer_height = Composer::height(height);
+        let mut input_field = InputArea::new(width, get_input_field_max_height(height));
+        let input_height = input_field.get_height(width);
         MessagingUI {
-            msg_area: MsgArea::new(width, height - composer_height, scrollback, msg_layout),
-            input_field: InputArea::new(width, get_input_field_max_height(height)),
-            composer: Composer::new(),
-            input_focus: InputFocus::Composer,
-            #[cfg(test)]
-            legacy_single_line_layout: false,
+            msg_area: MsgArea::new(width, height - input_height, scrollback, msg_layout),
+            input_field,
+            composer: None,
             exit_dialogue: None,
             width,
             height,
@@ -149,60 +137,28 @@ impl MessagingUI {
                 exit_dialogue.draw(tb, colors, pos_x, self.height - 1);
             }
             None => {
-                #[cfg(test)]
-                if self.legacy_single_line_layout {
-                    self.input_field.draw(
-                        tb,
-                        colors,
-                        pos_x,
-                        pos_y,
-                        self.height,
-                        &mut self.msg_area,
-                    );
-                    self.msg_area.draw(tb, colors, pos_x, pos_y);
-                    if self.msg_area.is_scrolled() && self.width > 0 {
-                        tb.change_cell(
-                            pos_x + self.width - 1,
-                            pos_y,
-                            SCROLLBACK_INDICATOR,
-                            colors.tab_active.fg,
-                            colors.tab_active.bg,
-                        );
-                    }
-                    return;
-                }
-                let composer_height = Composer::height(self.height);
+                let composer_height = self.composer_height();
                 let single_line_region_height = self.height - composer_height;
-                let focus_line_y = pos_y + single_line_region_height - 1;
                 // Draw InputArea first because it can trigger a resize of MsgArea.
                 self.input_field.draw(
                     tb,
                     colors,
                     pos_x,
                     pos_y,
-                    single_line_region_height - 1,
+                    single_line_region_height,
                     &mut self.msg_area,
                 );
-                if self.input_focus == InputFocus::SingleLine {
-                    for x in pos_x..pos_x + self.width {
-                        tb.change_cell(
-                            x,
-                            focus_line_y,
-                            '━',
-                            colors.user_msg.fg | TB_BOLD,
-                            colors.user_msg.bg,
-                        );
-                    }
+                if let Some(composer) = &mut self.composer {
+                    composer.draw(
+                        tb,
+                        colors,
+                        pos_x,
+                        pos_y + single_line_region_height,
+                        self.width,
+                        composer_height,
+                        true,
+                    );
                 }
-                self.composer.draw(
-                    tb,
-                    colors,
-                    pos_x,
-                    pos_y + single_line_region_height,
-                    self.width,
-                    composer_height,
-                    self.input_focus == InputFocus::Composer,
-                );
             }
         }
         self.msg_area.draw(tb, colors, pos_x, pos_y);
@@ -256,21 +212,38 @@ impl MessagingUI {
                 WidgetRet::KeyHandled
             }
             KeyAction::InputAutoComplete => {
-                if self.exit_dialogue.is_none() && self.input_focus == InputFocus::SingleLine {
+                if self.exit_dialogue.is_none() && self.composer.is_none() {
                     self.input_field.autocomplete(&self.nicks);
                 }
                 WidgetRet::KeyHandled
             }
             KeyAction::InputFocusToggle if self.exit_dialogue.is_none() => {
-                self.input_focus = match self.input_focus {
-                    InputFocus::SingleLine => InputFocus::Composer,
-                    InputFocus::Composer => InputFocus::SingleLine,
-                };
+                if self.composer.is_some() {
+                    self.submit_composer()
+                } else {
+                    self.open_composer();
+                    WidgetRet::KeyHandled
+                }
+            }
+            KeyAction::OpenComposer if self.exit_dialogue.is_none() => {
+                self.open_composer();
                 WidgetRet::KeyHandled
             }
-            KeyAction::OpenComposer => {
-                // Retain the old configurable action as a compatibility focus shortcut.
-                self.input_focus = InputFocus::Composer;
+            KeyAction::ComposerSend if self.exit_dialogue.is_none() && self.composer.is_some() => {
+                self.submit_composer()
+            }
+            KeyAction::Cancel if self.exit_dialogue.is_none() && self.composer.is_some() => {
+                self.close_composer();
+                WidgetRet::KeyHandled
+            }
+            KeyAction::TabNext
+            | KeyAction::TabPrev
+            | KeyAction::TabMoveLeft
+            | KeyAction::TabMoveRight
+            | KeyAction::TabGoto(_)
+            | KeyAction::Command(_)
+                if self.exit_dialogue.is_none() && self.composer.is_some() =>
+            {
                 WidgetRet::KeyHandled
             }
             key_action => {
@@ -278,9 +251,9 @@ impl MessagingUI {
                     if let Some(exit_dialogue) = self.exit_dialogue.as_ref() {
                         exit_dialogue.keypressed(key_action)
                     } else {
-                        match self.input_focus {
-                            InputFocus::SingleLine => self.input_field.keypressed(key_action),
-                            InputFocus::Composer => self.composer.keypressed(key_action),
+                        match &mut self.composer {
+                            None => self.input_field.keypressed(key_action),
+                            Some(composer) => composer.keypressed(key_action),
                         }
                     }
                 };
@@ -301,19 +274,8 @@ impl MessagingUI {
 
         self.input_field
             .resize(width, get_input_field_max_height(height));
-        #[cfg(test)]
-        let composer_height = if self.legacy_single_line_layout {
-            0
-        } else {
-            Composer::height(height)
-        };
-        #[cfg(not(test))]
-        let composer_height = Composer::height(height);
-        #[cfg(test)]
-        let focus_line_height = i32::from(!self.legacy_single_line_layout);
-        #[cfg(not(test))]
-        let focus_line_height = 1;
-        let input_height = self.input_field.get_height(width) + focus_line_height + composer_height;
+        let composer_height = self.composer_height();
+        let input_height = self.input_field.get_height(width) + composer_height;
         let msg_area_height = height - input_height;
         self.msg_area.resize(width, msg_area_height);
 
@@ -329,26 +291,51 @@ impl MessagingUI {
     }
 
     pub(crate) fn paste_into_composer(&mut self, pasted: &str) {
-        self.composer.insert_text(pasted);
-    }
-
-    pub(crate) fn has_exit_dialogue(&self) -> bool {
-        self.exit_dialogue.is_some()
+        self.open_composer();
+        self.composer.as_mut().unwrap().insert_text(pasted);
     }
 
     #[cfg(test)]
     pub(crate) fn input_focus(&self) -> &'static str {
-        match self.input_focus {
-            InputFocus::SingleLine => "single_line",
-            InputFocus::Composer => "composer",
+        match self.composer {
+            None => "single_line",
+            Some(_) => "composer",
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn use_legacy_single_line_layout(&mut self) {
-        self.legacy_single_line_layout = true;
-        self.input_focus = InputFocus::SingleLine;
+    pub(crate) fn msg_area_height(&self) -> i32 {
+        self.msg_area.get_height()
+    }
+
+    fn composer_height(&self) -> i32 {
+        if self.composer.is_some() {
+            Composer::height(self.height)
+        } else {
+            0
+        }
+    }
+
+    fn open_composer(&mut self) {
+        if self.composer.is_none() {
+            self.composer = Some(Composer::new());
+            self.resize(self.width, self.height);
+        }
+    }
+
+    fn close_composer(&mut self) {
+        self.composer = None;
         self.resize(self.width, self.height);
+    }
+
+    fn submit_composer(&mut self) -> WidgetRet {
+        let ret = self
+            .composer
+            .as_mut()
+            .expect("composer submission requires an open composer")
+            .keypressed(&KeyAction::ComposerSend);
+        self.close_composer();
+        ret
     }
 
     fn toggle_exit_dialogue(&mut self) {

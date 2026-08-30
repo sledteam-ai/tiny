@@ -1,8 +1,7 @@
 use std::panic::Location;
 
 use libtiny_common::{ChanName, ChanNameRef, MsgSource, MsgTarget};
-use term_input::{Event, Key};
-use termbox_simple::TB_BOLD;
+use term_input::{Arrow, Event, FKey, Key};
 
 use crate::test_utils::{buffer_str, expect_screen};
 use crate::tui::TUI;
@@ -19,9 +18,7 @@ fn enter_string(tui: &mut TUI, s: &str) {
 }
 
 fn single_line_tui(w: u16, h: u16) -> TUI {
-    let mut tui = TUI::new_test(w, h);
-    tui.use_single_line_input();
-    tui
+    TUI::new_test(w, h)
 }
 
 #[test]
@@ -104,95 +101,162 @@ fn tab_navigation_skips_hidden_mentions_tab() {
 }
 
 #[test]
-fn dual_inputs_are_visible_and_tab_toggles_focus() {
+fn new_tabs_start_with_only_normal_input_and_tab_opens_the_composer() {
     let mut tui = TUI::new_test(30, 10);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
 
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
-    tui.draw();
-    let buffer = tui.get_front_buffer();
-    let single_line = 3 * 30;
-    let single_line_focus = 4 * 30;
-    let composer_top = 5 * 30;
-    assert_eq!(buffer.cells[composer_top].ch, '┏');
-    assert_eq!(buffer.cells[single_line_focus + 29].ch, ' ');
-    assert_ne!(buffer.cells[composer_top].fg & TB_BOLD, 0);
-
-    tui.handle_input_event(Event::Key(Key::Tab));
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert_eq!(tui.get_tabs()[1].widget.msg_area_height(), 8);
     tui.draw();
-    let buffer = tui.get_front_buffer();
-    assert_eq!(buffer.cells[single_line + 29].ch, ' ');
-    assert_eq!(buffer.cells[single_line_focus + 29].ch, '━');
-    assert_ne!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
-    assert_eq!(buffer.cells[composer_top].fg & TB_BOLD, 0);
+    assert_ne!(tui.get_front_buffer().cells[5 * 30].ch, '┏');
 
-    enter_string(&mut tui, "command text");
-    tui.draw();
-    let buffer = tui.get_front_buffer();
-    assert_eq!(buffer.cells[single_line_focus + 29].ch, '━');
-    assert_ne!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
-
-    tui.handle_input_event(Event::Key(Key::Tab));
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    assert_eq!(tui.get_tabs()[1].widget.msg_area_height(), 4);
     tui.draw();
-    let buffer = tui.get_front_buffer();
-    assert_eq!(buffer.cells[single_line_focus + 29].ch, ' ');
-    assert_eq!(buffer.cells[single_line_focus + 29].fg & TB_BOLD, 0);
+    assert_eq!(tui.get_front_buffer().cells[5 * 30].ch, '┏');
 }
 
 #[test]
-fn composer_enter_and_ctrl_s_submit_one_logical_message() {
+fn normal_input_and_slash_command_submission_stay_on_the_input_path() {
     let mut tui = TUI::new_test(30, 10);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
 
-    enter_string(&mut tui, "first");
-    assert!(
-        tui.handle_input_event(Event::Key(Key::Char('\r')))
-            .is_none()
-    );
-    enter_string(&mut tui, "second");
-
+    enter_string(&mut tui, "quick riff");
     assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Ctrl('s'))),
+        tui.handle_input_event(Event::Key(Key::Char('\r'))),
+        Some(crate::tui::TUIRet::Input { msg, .. })
+            if msg.iter().collect::<String>() == "quick riff"
+    ));
+
+    enter_string(&mut tui, "/join #tiny");
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Char('\r'))),
+        Some(crate::tui::TUIRet::Input { msg, .. })
+            if msg.iter().collect::<String>() == "/join #tiny"
+    ));
+}
+
+#[test]
+fn tab_submits_multiline_composer_content_and_closes_it() {
+    let mut tui = TUI::new_test(30, 10);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    tui.handle_input_event(Event::Key(Key::Tab));
+
+    enter_string(&mut tui, "first");
+    tui.handle_input_event(Event::Key(Key::Char('\r')));
+    enter_string(&mut tui, "second");
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Tab)),
         Some(crate::tui::TUIRet::Lines { lines, .. })
             if lines == ["first", "second"]
     ));
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert_eq!(tui.get_tabs()[1].widget.msg_area_height(), 8);
 
-    enter_string(&mut tui, "next");
+    tui.handle_input_event(Event::Key(Key::Tab));
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+}
+
+#[test]
+fn slash_and_whitespace_composer_content_use_lines_but_empty_content_does_not() {
+    let mut tui = TUI::new_test(30, 10);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+
+    tui.handle_input_event(Event::Key(Key::Tab));
+    enter_string(&mut tui, "/trail still message content");
     assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Ctrl('s'))),
-        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["next"]
+        tui.handle_input_event(Event::Key(Key::Tab)),
+        Some(crate::tui::TUIRet::Lines { lines, .. })
+            if lines == ["/trail still message content"]
+    ));
+
+    tui.handle_input_event(Event::Key(Key::Tab));
+    enter_string(&mut tui, "  ");
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Tab)),
+        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["  "]
+    ));
+
+    tui.handle_input_event(Event::Key(Key::Tab));
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+}
+
+#[test]
+fn escape_cancels_and_discards_the_composer() {
+    let mut tui = TUI::new_test(30, 10);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    tui.handle_input_event(Event::Key(Key::Tab));
+    enter_string(&mut tui, "discard me");
+
+    assert!(tui.handle_input_event(Event::Key(Key::Esc)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    tui.handle_input_event(Event::Key(Key::Tab));
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+}
+
+#[test]
+fn f1_toggles_help_without_destroying_normal_or_composer_drafts() {
+    let mut tui = TUI::new_test(70, 30);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    enter_string(&mut tui, "command draft");
+
+    tui.handle_input_event(Event::Key(Key::Esc));
+    assert!(!tui.navigation_dialog_visible());
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    assert!(tui.navigation_dialog_visible());
+    tui.draw();
+    assert!(buffer_str(&tui.get_front_buffer(), 70, 30).contains("Navigation"));
+    tui.handle_input_event(Event::Key(Key::Esc));
+    assert!(tui.navigation_dialog_visible());
+    enter_string(&mut tui, " ignored");
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    assert!(!tui.navigation_dialog_visible());
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Char('\r'))),
+        Some(crate::tui::TUIRet::Input { msg, .. })
+            if msg.iter().collect::<String>() == "command draft"
+    ));
+
+    tui.handle_input_event(Event::Key(Key::Tab));
+    enter_string(&mut tui, "composer draft");
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    assert!(matches!(
+        tui.handle_input_event(Event::Key(Key::Tab)),
+        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["composer draft"]
     ));
 }
 
 #[test]
-fn multiline_paste_targets_composer_without_changing_focus() {
+fn multiline_paste_opens_focuses_and_populates_the_composer() {
     let mut tui = TUI::new_test(20, 10);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
-    tui.handle_input_event(Event::Key(Key::Tab));
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
 
     assert!(
         tui.handle_input_event(Event::String("one\r\ntwo".to_owned()))
             .is_none()
     );
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
-
-    tui.handle_input_event(Event::Key(Key::Tab));
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    tui.draw();
+    assert!(buffer_str(&tui.get_front_buffer(), 20, 10).contains("one"));
     assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Ctrl('s'))),
+        tui.handle_input_event(Event::Key(Key::Tab)),
         Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["one", "two"]
     ));
 }
 
 #[test]
-fn scrollback_and_tab_movement_do_not_change_input_focus() {
-    let mut tui = TUI::new_test(24, 10);
+fn target_navigation_is_suppressed_while_composing() {
+    let mut tui = TUI::new_test(30, 10);
     let serv = "irc.example.org";
     let first = ChanNameRef::new("#first");
     let second = ChanNameRef::new("#second");
@@ -201,123 +265,71 @@ fn scrollback_and_tab_movement_do_not_change_input_focus() {
     tui.new_chan_tab(serv, second);
     tui.next_tab();
     tui.next_tab();
+    let source = tui.current_tab().clone();
+    let tab_order: Vec<_> = tui.get_tabs().iter().map(|tab| tab.src.clone()).collect();
+    tui.handle_input_event(Event::Key(Key::Tab));
 
-    for line in 0..20 {
-        tui.add_msg(
-            &format!("line{line}"),
-            time::empty_tm(),
-            &MsgTarget::Chan { serv, chan: first },
+    for key in [
+        Key::Ctrl('n'),
+        Key::Ctrl('p'),
+        Key::AltArrow(Arrow::Left),
+        Key::AltArrow(Arrow::Right),
+        Key::AltChar('1'),
+    ] {
+        tui.handle_input_event(Event::Key(key));
+        assert_eq!(tui.current_tab(), &source);
+        assert_eq!(
+            tui.get_tabs()
+                .iter()
+                .map(|tab| tab.src.clone())
+                .collect::<Vec<_>>(),
+            tab_order
         );
     }
-    tui.handle_input_event(Event::String("draft\ntext".to_owned()));
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)));
-    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 5);
-    assert_eq!(tui.get_tabs()[2].widget.input_focus(), "composer");
 
-    let source = tui.current_tab().clone();
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Right)));
-    assert_eq!(tui.current_tab(), &source);
-    assert_eq!(tui.get_tabs()[3].widget.input_focus(), "composer");
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Left)));
-    assert_eq!(tui.current_tab(), &source);
-    assert_eq!(tui.get_tabs()[2].widget.input_focus(), "composer");
-
-    tui.handle_input_event(Event::Key(Key::Tab));
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
-    assert_eq!(tui.get_tabs()[2].widget.scroll_offset(), 0);
-    assert_eq!(tui.get_tabs()[2].widget.input_focus(), "single_line");
-}
-
-#[test]
-fn single_line_send_is_unchanged() {
-    let mut tui = TUI::new_test(20, 10);
-    tui.new_server_tab("irc.example.org", None);
-    tui.next_tab();
-    tui.handle_input_event(Event::Key(Key::Tab));
-    enter_string(&mut tui, "quick riff");
-
+    enter_string(&mut tui, "still here");
     assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Char('\r'))),
-        Some(crate::tui::TUIRet::Input { msg, .. })
-            if msg.iter().collect::<String>() == "quick riff"
+        tui.handle_input_event(Event::Key(Key::Tab)),
+        Some(crate::tui::TUIRet::Lines { lines, from })
+            if lines == ["still here"] && from == source
     ));
 }
 
 #[test]
-fn composer_content_is_not_parsed_as_a_command() {
-    let mut tui = TUI::new_test(30, 10);
+fn composer_layout_resizes_and_restores_scrollback_safely() {
+    let mut tui = TUI::new_test(24, 12);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
-    enter_string(&mut tui, "/trail still message content");
-
-    assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Ctrl('s'))),
-        Some(crate::tui::TUIRet::Lines { lines, .. })
-            if lines == ["/trail still message content"]
-    ));
-}
-
-#[test]
-fn navigation_dialog_preserves_focus_and_drafts_and_suppresses_input() {
-    let mut tui = TUI::new_test(70, 30);
-    tui.new_server_tab("irc.example.org", None);
-    tui.new_server_tab("irc.other.example", None);
-    tui.next_tab();
-    enter_string(&mut tui, "composer draft");
-    tui.handle_input_event(Event::Key(Key::Tab));
-    enter_string(&mut tui, "command draft");
     for line in 0..30 {
         tui.add_msg(
             &format!("line{line}"),
             time::empty_tm(),
-            &MsgTarget::Server {
-                serv: "irc.example.org",
-            },
+            &MsgTarget::CurrentTab,
         );
     }
-    tui.draw();
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Up)));
-    let scroll_offset = tui.get_tabs()[1].widget.scroll_offset();
-    assert!(scroll_offset > 0);
-
-    tui.handle_input_event(Event::Key(Key::Esc));
-    assert!(tui.navigation_dialog_visible());
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
-    tui.draw();
-    assert!(buffer_str(&tui.get_front_buffer(), 70, 30).contains("Navigation"));
-
-    enter_string(&mut tui, " ignored");
-    tui.handle_input_event(Event::String("\npasted".to_owned()));
-    tui.handle_input_event(Event::Key(Key::Tab));
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Right)));
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
-    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), scroll_offset);
-
-    tui.handle_input_event(Event::Key(Key::Esc));
-    assert!(!tui.navigation_dialog_visible());
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Down)));
-    assert_eq!(tui.get_tabs()[1].widget.scroll_offset(), 0);
-    assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Char('\r'))),
-        Some(crate::tui::TUIRet::Input { msg, .. })
-            if msg.iter().collect::<String>() == "command draft"
-    ));
+    tui.handle_input_event(Event::Key(Key::AltArrow(Arrow::Up)));
+    let initial_scroll = tui.get_tabs()[1].widget.scroll_offset();
+    let initial_height = tui.get_tabs()[1].widget.msg_area_height();
 
     tui.handle_input_event(Event::Key(Key::Tab));
+    assert!(tui.get_tabs()[1].widget.msg_area_height() < initial_height);
+    assert!(tui.get_tabs()[1].widget.scroll_offset() > 0);
+    tui.set_size(32, 16);
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
-    assert!(matches!(
-        tui.handle_input_event(Event::Key(Key::Ctrl('s'))),
-        Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["composer draft"]
-    ));
+    assert!(tui.get_tabs()[1].widget.msg_area_height() > 0);
+    tui.handle_input_event(Event::Key(Key::Esc));
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert!(tui.get_tabs()[1].widget.msg_area_height() > initial_height);
+    assert!(tui.get_tabs()[1].widget.scroll_offset() > 0);
+    assert!(initial_scroll > 0);
 
-    let source = tui.current_tab().clone();
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Right)));
-    assert_eq!(tui.current_tab(), &source);
-    tui.handle_input_event(Event::Key(Key::AltArrow(term_input::Arrow::Left)));
-    assert_eq!(tui.current_tab(), &source);
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    for size in 0..=4 {
+        tui.set_size(size, size);
+        tui.handle_input_event(Event::Key(Key::Tab));
+        tui.draw();
+        tui.handle_input_event(Event::Key(Key::Esc));
+        tui.draw();
+    }
 }
 
 #[test]

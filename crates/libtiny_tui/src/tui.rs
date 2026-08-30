@@ -92,9 +92,6 @@ pub struct TUI {
     tab_configs: TabConfigs,
 
     navigation_dialog_visible: bool,
-
-    #[cfg(test)]
-    legacy_single_line_layout: bool,
 }
 
 pub(crate) enum CmdResult {
@@ -119,14 +116,6 @@ impl TUI {
     pub fn new_test(w: u16, h: u16) -> TUI {
         let tb = Termbox::init_test(w, h);
         TUI::new_tb(None, tb)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn use_single_line_input(&mut self) {
-        self.legacy_single_line_layout = true;
-        self.tabs[self.active_idx]
-            .widget
-            .use_legacy_single_line_layout();
     }
 
     /// Get termbox front buffer. Useful for testing rendering.
@@ -178,8 +167,6 @@ impl TUI {
             config_path,
             tab_configs: TabConfigs::default(),
             navigation_dialog_visible: false,
-            #[cfg(test)]
-            legacy_single_line_layout: false,
         };
 
         // Init "mentions" tab. This needs to happen right after creating the TUI to be able to
@@ -449,10 +436,6 @@ impl TUI {
                 switch,
             },
         );
-        #[cfg(test)]
-        if self.legacy_single_line_layout {
-            self.tabs[idx].widget.use_legacy_single_line_layout();
-        }
     }
 
     fn hide_server_tab(&mut self, serv: &str) {
@@ -611,19 +594,6 @@ impl TUI {
     }
 
     fn keypressed(&mut self, key: Key) -> Option<TUIRet> {
-        if key == Key::Esc {
-            if self.navigation_dialog_visible {
-                self.navigation_dialog_visible = false;
-                return None;
-            }
-            if !self.tabs[self.active_idx].widget.has_exit_dialogue() {
-                self.navigation_dialog_visible = true;
-                return None;
-            }
-        } else if self.navigation_dialog_visible {
-            return None;
-        }
-
         let key_action = self.key_map.get(&key).or(match key {
             Key::Char(c) => Some(KeyAction::Input(c)),
             Key::AltChar(c) => Some(KeyAction::TabGoto(c)),
@@ -631,6 +601,15 @@ impl TUI {
         });
 
         let key_action = key_action?;
+
+        if key_action == KeyAction::ToggleNavigationHelp {
+            self.navigation_dialog_visible = !self.navigation_dialog_visible;
+            return None;
+        }
+
+        if self.navigation_dialog_visible {
+            return None;
+        }
 
         match self.tabs[self.active_idx].widget.keypressed(&key_action) {
             WidgetRet::KeyHandled => None,

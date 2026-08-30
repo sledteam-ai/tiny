@@ -14,6 +14,7 @@ pub(crate) enum KeyAction {
     Cancel,
     Disable,
     Exit,
+    ToggleNavigationHelp,
 
     #[serde(alias = "run_editor")]
     OpenComposer,
@@ -59,6 +60,7 @@ impl Default for KeyMap {
     fn default() -> Self {
         let map = [
             (Key::Esc, KeyAction::Cancel),
+            (Key::FKey(FKey::F1), KeyAction::ToggleNavigationHelp),
             (Key::Ctrl('c'), KeyAction::Exit),
             (Key::Ctrl('s'), KeyAction::ComposerSend),
             (Key::Ctrl('n'), KeyAction::TabNext),
@@ -310,6 +312,7 @@ impl Display for KeyAction {
             KeyAction::Cancel => "cancel",
             KeyAction::Disable => "disable",
             KeyAction::Exit => "exit",
+            KeyAction::ToggleNavigationHelp => "toggle_navigation_help",
             KeyAction::OpenComposer => "open_composer",
             KeyAction::ComposerSend => "composer_send",
             KeyAction::InputFocusToggle => "input_focus_toggle",
@@ -536,10 +539,15 @@ fn default_alt_arrow_bindings_preserve_tab_movement_and_add_scrollback() {
 }
 
 #[test]
-fn default_composer_bindings_toggle_focus_and_submit_with_ctrl_s() {
+fn default_composer_and_navigation_help_bindings() {
     let keys = KeyMap::default();
     assert_eq!(keys.get(&Key::Tab), Some(KeyAction::InputFocusToggle));
     assert_eq!(keys.get(&Key::Ctrl('s')), Some(KeyAction::ComposerSend));
+    assert_eq!(
+        keys.get(&Key::FKey(FKey::F1)),
+        Some(KeyAction::ToggleNavigationHelp)
+    );
+    assert_eq!(keys.get(&Key::Esc), Some(KeyAction::Cancel));
     assert_eq!(keys.get(&Key::Ctrl('x')), None);
     assert_eq!(keys.get(&Key::CtrlEnter), None);
 }
