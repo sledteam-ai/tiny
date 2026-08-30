@@ -188,6 +188,59 @@ fn wrapped_multiline_body_does_not_gain_sender_prefixes() {
     assert_eq!(screen.matches("mushbot").count(), 1, "{screen:?}");
 }
 
+#[test]
+fn completed_multiline_response_is_reachable_before_older_history() {
+    let mut tui = single_line_tui(16, 6);
+    let serv = "irc.server_1.org";
+    let chan = ChanNameRef::new("#chan");
+    tui.new_server_tab(serv, None);
+    tui.set_nick(serv, "osa1");
+    tui.new_chan_tab(serv, chan);
+    tui.next_tab();
+    tui.next_tab();
+
+    let target = MsgTarget::Chan { serv, chan };
+    let ts = time::at_utc(time::Timespec::new(0, 0));
+    for line in 0..8 {
+        tui.add_msg(&format!("OLD{line:02}"), ts, &target);
+    }
+
+    // A completed IRCv3 multiline batch reaches the TUI in one call. MessagingUI
+    // flushes one sender/header line, followed by one logical Line per body line.
+    let recent = (0..40)
+        .map(|line| format!("R{line:02}Aaaaa R{line:02}Bbbbb"))
+        .collect::<Vec<_>>();
+    let expected_rows = (0..40)
+        .flat_map(|line| [format!("R{line:02}Aaaaa"), format!("R{line:02}Bbbbb")])
+        .collect::<std::collections::BTreeSet<_>>();
+    tui.add_multiline_privmsg("mushbot", &recent, ts, &target, false);
+
+    let mut reached = std::collections::BTreeSet::new();
+    loop {
+        tui.draw();
+        let screen = buffer_str(&tui.get_front_buffer(), 16, 6);
+        for row in &expected_rows {
+            if screen.contains(row) {
+                reached.insert(row.clone());
+            }
+        }
+
+        if screen.contains("OLD") {
+            break;
+        }
+
+        let old_scroll = tui.get_tabs()[2].widget.scroll_offset();
+        tui.handle_input_event(term_input::Event::Key(term_input::Key::MouseWheelUp));
+        let new_scroll = tui.get_tabs()[2].widget.scroll_offset();
+        assert!(
+            new_scroll > old_scroll,
+            "reached scrollback limit before older history"
+        );
+    }
+
+    assert_eq!(reached, expected_rows);
+}
+
 // Test all combinations of
 //
 // 1.1 Message followed by activity
