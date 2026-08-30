@@ -60,7 +60,6 @@ impl Default for KeyMap {
     fn default() -> Self {
         let map = [
             (Key::Esc, KeyAction::Cancel),
-            (Key::FKey(FKey::F1), KeyAction::ToggleNavigationHelp),
             (Key::Ctrl('c'), KeyAction::Exit),
             (Key::Ctrl('s'), KeyAction::ComposerSend),
             (Key::Ctrl('n'), KeyAction::TabNext),
@@ -543,13 +542,29 @@ fn default_composer_and_navigation_help_bindings() {
     let keys = KeyMap::default();
     assert_eq!(keys.get(&Key::Tab), Some(KeyAction::InputFocusToggle));
     assert_eq!(keys.get(&Key::Ctrl('s')), Some(KeyAction::ComposerSend));
-    assert_eq!(
-        keys.get(&Key::FKey(FKey::F1)),
-        Some(KeyAction::ToggleNavigationHelp)
-    );
+    assert_eq!(keys.get(&Key::FKey(FKey::F1)), None);
+    assert_eq!(keys.get(&Key::FKey(FKey::F2)), None);
     assert_eq!(keys.get(&Key::Esc), Some(KeyAction::Cancel));
     assert_eq!(keys.get(&Key::Ctrl('x')), None);
     assert_eq!(keys.get(&Key::CtrlEnter), None);
+}
+
+#[test]
+fn navigation_help_binding_can_be_remapped() {
+    let mut keys = KeyMap::default();
+    let custom: KeyMap = serde_yaml::from_str(
+        r#"
+        f3: toggle_navigation_help
+        "#,
+    )
+    .unwrap();
+    keys.load(&custom);
+
+    assert_eq!(keys.get(&Key::FKey(FKey::F2)), None);
+    assert_eq!(
+        keys.get(&Key::FKey(FKey::F3)),
+        Some(KeyAction::ToggleNavigationHelp)
+    );
 }
 
 #[test]

@@ -3,6 +3,7 @@ use std::panic::Location;
 use libtiny_common::{ChanName, ChanNameRef, MsgSource, MsgTarget};
 use term_input::{Arrow, Event, FKey, Key};
 
+use crate::key_map::KeyMap;
 use crate::test_utils::{buffer_str, expect_screen};
 use crate::tui::TUI;
 
@@ -202,22 +203,26 @@ fn escape_cancels_and_discards_the_composer() {
 }
 
 #[test]
-fn f1_toggles_help_without_destroying_normal_or_composer_drafts() {
+fn configured_navigation_help_key_can_be_remapped_without_leaving_f2_active() {
     let mut tui = TUI::new_test(70, 30);
+    let key_map: KeyMap = serde_yaml::from_str("f3: toggle_navigation_help").unwrap();
+    tui.load_key_map(&key_map);
     tui.new_server_tab("irc.example.org", None);
     tui.next_tab();
     enter_string(&mut tui, "command draft");
 
     tui.handle_input_event(Event::Key(Key::Esc));
     assert!(!tui.navigation_dialog_visible());
-    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F2)));
+    assert!(!tui.navigation_dialog_visible());
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F3)));
     assert!(tui.navigation_dialog_visible());
     tui.draw();
     assert!(buffer_str(&tui.get_front_buffer(), 70, 30).contains("Navigation"));
     tui.handle_input_event(Event::Key(Key::Esc));
     assert!(tui.navigation_dialog_visible());
     enter_string(&mut tui, " ignored");
-    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F3)));
     assert!(!tui.navigation_dialog_visible());
     assert!(matches!(
         tui.handle_input_event(Event::Key(Key::Char('\r'))),
@@ -227,8 +232,8 @@ fn f1_toggles_help_without_destroying_normal_or_composer_drafts() {
 
     tui.handle_input_event(Event::Key(Key::Tab));
     enter_string(&mut tui, "composer draft");
-    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
-    tui.handle_input_event(Event::Key(Key::FKey(FKey::F1)));
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F3)));
+    tui.handle_input_event(Event::Key(Key::FKey(FKey::F3)));
     assert!(matches!(
         tui.handle_input_event(Event::Key(Key::Tab)),
         Some(crate::tui::TUIRet::Lines { lines, .. }) if lines == ["composer draft"]

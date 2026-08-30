@@ -133,6 +133,11 @@ impl TUI {
     }
 
     #[cfg(test)]
+    pub(crate) fn load_key_map(&mut self, key_map: &KeyMap) {
+        self.key_map.load(key_map);
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_layout(&mut self, layout: Layout) {
         self.msg_layout = layout
     }

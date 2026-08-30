@@ -11,7 +11,7 @@ const LINES: &[&str] = &[
     "Navigation",
     "=============",
     "",
-    "F1              close this help",
+    "F2              close this help",
     "Tab             open/send prompt composer",
     "Alt+Left        previous tab",
     "Alt+Right       next tab",

@@ -191,10 +191,12 @@ colors:
 # key_map:
     ### Defaults ###
     # ctrl_c: exit
-    # f1: toggle_navigation_help
     # esc: cancel
     # tab: input_focus_toggle
     # ctrl_s: composer_send
+
+    # Bind navigation help to any available key:
+    # f3: toggle_navigation_help
 
     # alt_1:
     #     tab_goto: 1
