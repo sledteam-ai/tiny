@@ -312,6 +312,66 @@ fn opening_and_closing_completion_restores_message_area_height() {
 }
 
 #[test]
+fn command_feedback_uses_auxiliary_area_without_entering_message_history() {
+    let mut tui = completion_tui();
+    let lines_before = tui.get_tabs()[1].widget.lines_text();
+    let height_before = tui.get_tabs()[1].widget.msg_area_height();
+    let feedback = vec![
+        "Usage: /expedition add <name>".to_owned(),
+        "       /expedition list".to_owned(),
+    ];
+
+    tui.show_command_feedback(&feedback, &MsgTarget::CurrentTab);
+    tui.draw();
+
+    assert_eq!(tui.get_tabs()[1].widget.lines_text(), lines_before);
+    assert!(tui.get_tabs()[1].widget.msg_area_height() < height_before);
+    assert_eq!(
+        tui.get_tabs()[1].widget.command_feedback_lines(),
+        Some(feedback)
+    );
+    assert!(buffer_str(&tui.get_front_buffer(), 60, 14).contains("Usage: /expedition"));
+}
+
+#[test]
+fn typing_dismisses_feedback_and_command_prefix_replaces_it_with_completion() {
+    let mut tui = completion_tui();
+    tui.show_command_feedback(
+        &["Usage: /expedition <arguments>".to_owned()],
+        &MsgTarget::CurrentTab,
+    );
+
+    enter_string(&mut tui, "hello");
+    assert_eq!(tui.get_tabs()[1].widget.command_feedback_lines(), None);
+    assert_eq!(completion_names(&tui), None);
+
+    for _ in 0..5 {
+        tui.handle_input_event(Event::Key(Key::Backspace));
+    }
+    tui.show_command_feedback(
+        &["Usage: /expedition <arguments>".to_owned()],
+        &MsgTarget::CurrentTab,
+    );
+    enter_string(&mut tui, "/tr");
+    assert_eq!(tui.get_tabs()[1].widget.command_feedback_lines(), None);
+    assert_eq!(completion_names(&tui), Some(vec!["trail", "travel"]));
+}
+
+#[test]
+fn composer_is_isolated_from_command_feedback() {
+    let mut tui = completion_tui();
+    tui.handle_input_event(Event::Key(Key::Tab));
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+
+    tui.show_command_feedback(
+        &["Usage: /expedition <arguments>".to_owned()],
+        &MsgTarget::CurrentTab,
+    );
+    assert_eq!(tui.get_tabs()[1].widget.command_feedback_lines(), None);
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+}
+
+#[test]
 fn init_screen() {
     let mut tui = single_line_tui(20, 4);
     tui.draw();

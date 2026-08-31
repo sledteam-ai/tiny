@@ -31,7 +31,7 @@ pub(crate) fn run_cmd(
         }
 
         None => {
-            ui.add_client_err_msg(&unknown_command_message(cmd), &MsgTarget::CurrentTab);
+            ui.show_command_feedback(&[unknown_command_message(cmd)], &MsgTarget::CurrentTab);
         }
     }
 }
@@ -1019,7 +1019,8 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
 
         let (snd_input, rcv_input) = mpsc::channel(1);
         let input = ReceiverStream::new(rcv_input).map(Ok);
-        let (tui, _tui_events) = TUI::run_test(40, 5, input);
+        const TUI_HEIGHT: u16 = 10;
+        let (tui, _tui_events) = TUI::run_test(40, TUI_HEIGHT, input);
         let ui = UI::new(
             tui.clone(),
             None,
@@ -1048,7 +1049,7 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             &mut clients,
         );
         ui.draw();
-        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: /ets"));
+        assert!(buffer_str(&tui.get_front_buffer(), 40, TUI_HEIGHT).contains("Usage: /ets"));
 
         run_cmd(
             "shutdown sledteam",
@@ -1058,7 +1059,7 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             &mut clients,
         );
         ui.draw();
-        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: /shutdown"));
+        assert!(buffer_str(&tui.get_front_buffer(), 40, TUI_HEIGHT).contains("Usage: /shutdown"));
 
         run_cmd("ets", source.clone(), &defaults, &ui, &mut clients);
         assert!(!ui.user_tab_exists("127.0.0.1", crate::sledserv::NICK));

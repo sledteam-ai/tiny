@@ -4,6 +4,7 @@ use std::convert::From;
 
 use time::{self, Tm};
 
+use crate::command_activity::{CommandActivity, CommandFeedback};
 use crate::command_completion::CommandCompletion;
 use crate::composer::Composer;
 use crate::config::Colors;
@@ -28,8 +29,8 @@ pub(crate) struct MessagingUI {
     /// The transient auxiliary input pane. `None` means normal Tiny input mode.
     composer: Option<Composer>,
 
-    /// Slash-command matches shown in the same auxiliary region as the composer.
-    command_completion: Option<CommandCompletion>,
+    /// Completion or retry-oriented feedback shown in the command auxiliary region.
+    command_activity: Option<CommandActivity>,
 
     command_infos: &'static [CommandInfo],
 
@@ -111,7 +112,7 @@ impl MessagingUI {
             msg_area: MsgArea::new(width, height - input_height, scrollback, msg_layout),
             input_field,
             composer: None,
-            command_completion: None,
+            command_activity: None,
             command_infos: &[],
             exit_dialogue: None,
             width,
@@ -167,8 +168,8 @@ impl MessagingUI {
                         auxiliary_height,
                         true,
                     );
-                } else if let Some(completion) = &self.command_completion {
-                    completion.draw(
+                } else if let Some(command_activity) = &self.command_activity {
+                    command_activity.draw(
                         tb,
                         colors,
                         pos_x,
@@ -257,7 +258,7 @@ impl MessagingUI {
             KeyAction::InputPrevEntry
                 if self.exit_dialogue.is_none() && self.composer.is_none() =>
             {
-                if let Some(completion) = &mut self.command_completion {
+                if let Some(CommandActivity::Completion(completion)) = &mut self.command_activity {
                     completion.select_previous();
                     return WidgetRet::KeyHandled;
                 }
@@ -266,7 +267,7 @@ impl MessagingUI {
             KeyAction::InputNextEntry
                 if self.exit_dialogue.is_none() && self.composer.is_none() =>
             {
-                if let Some(completion) = &mut self.command_completion {
+                if let Some(CommandActivity::Completion(completion)) = &mut self.command_activity {
                     completion.select_next();
                     return WidgetRet::KeyHandled;
                 }
@@ -281,9 +282,9 @@ impl MessagingUI {
             KeyAction::Cancel
                 if self.exit_dialogue.is_none()
                     && self.composer.is_none()
-                    && self.command_completion.is_some() =>
+                    && self.command_activity.is_some() =>
             {
-                self.command_completion = None;
+                self.command_activity = None;
                 self.resize(self.width, self.height);
                 WidgetRet::KeyHandled
             }
@@ -377,8 +378,8 @@ impl MessagingUI {
     }
 
     fn auxiliary_height(&self) -> i32 {
-        if let Some(composer) = &self.command_completion {
-            composer.height(self.height)
+        if let Some(command_activity) = &self.command_activity {
+            command_activity.height(self.height)
         } else {
             self.composer_height()
         }
@@ -389,15 +390,25 @@ impl MessagingUI {
         self.update_command_completion();
     }
 
+    pub(crate) fn show_command_feedback(&mut self, lines: &[String]) {
+        if self.composer.is_none() {
+            self.command_activity = CommandFeedback::new(lines).map(CommandActivity::Feedback);
+            self.resize(self.width, self.height);
+        }
+    }
+
     fn update_command_completion(&mut self) {
         let text = self.input_field.text();
         let prefix = text
             .strip_prefix('/')
             .filter(|prefix| !prefix.chars().any(char::is_whitespace));
-        self.command_completion = match prefix {
-            Some(prefix) => match self.command_completion.take() {
-                Some(mut completion) => completion.update(prefix).then_some(completion),
-                None => CommandCompletion::new(self.command_infos, prefix),
+        self.command_activity = match prefix {
+            Some(prefix) => match self.command_activity.take() {
+                Some(CommandActivity::Completion(mut completion)) => completion
+                    .update(prefix)
+                    .then_some(CommandActivity::Completion(completion)),
+                _ => CommandCompletion::new(self.command_infos, prefix)
+                    .map(CommandActivity::Completion),
             },
             None => None,
         };
@@ -406,32 +417,51 @@ impl MessagingUI {
 
     fn accept_command_completion(&mut self) -> bool {
         let Some(command) = self
-            .command_completion
+            .command_activity
             .as_ref()
-            .map(CommandCompletion::selected_command)
+            .and_then(|activity| match activity {
+                CommandActivity::Completion(completion) => Some(completion.selected_command()),
+                CommandActivity::Feedback(_) => None,
+            })
         else {
             return false;
         };
 
         self.input_field
             .replace_text(&format!("/{} ", command.name));
-        self.command_completion = None;
+        self.command_activity = None;
         self.resize(self.width, self.height);
         true
     }
 
     #[cfg(test)]
     pub(crate) fn command_completion_matches(&self) -> Option<Vec<CommandInfo>> {
-        self.command_completion
+        self.command_activity
             .as_ref()
-            .map(CommandCompletion::matches)
+            .and_then(|activity| match activity {
+                CommandActivity::Completion(completion) => Some(completion.matches()),
+                CommandActivity::Feedback(_) => None,
+            })
     }
 
     #[cfg(test)]
     pub(crate) fn selected_command_completion(&self) -> Option<CommandInfo> {
-        self.command_completion
+        self.command_activity
             .as_ref()
-            .map(CommandCompletion::selected)
+            .and_then(|activity| match activity {
+                CommandActivity::Completion(completion) => Some(completion.selected()),
+                CommandActivity::Feedback(_) => None,
+            })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn command_feedback_lines(&self) -> Option<Vec<String>> {
+        self.command_activity
+            .as_ref()
+            .and_then(|activity| match activity {
+                CommandActivity::Completion(_) => None,
+                CommandActivity::Feedback(feedback) => Some(feedback.lines()),
+            })
     }
 
     #[cfg(test)]
@@ -441,7 +471,7 @@ impl MessagingUI {
 
     fn open_composer(&mut self) {
         if self.composer.is_none() {
-            self.command_completion = None;
+            self.command_activity = None;
             self.composer = Some(Composer::new());
             self.resize(self.width, self.height);
         }

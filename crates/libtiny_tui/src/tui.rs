@@ -1287,6 +1287,12 @@ impl TUI {
         });
     }
 
+    pub(crate) fn show_command_feedback(&mut self, lines: &[String], target: &MsgTarget) {
+        self.apply_to_target(target, true, &mut |tab: &mut Tab, _| {
+            tab.widget.show_command_feedback(lines);
+        });
+    }
+
     /// A notify message coming from tiny, usually shows a response of a command
     /// e.g. "Notifications enabled".
     pub(crate) fn add_client_notify_msg(&mut self, msg: &str, target: &MsgTarget) {

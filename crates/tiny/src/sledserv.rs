@@ -25,6 +25,7 @@ struct PendingRequest {
 pub(crate) struct LocalResponse {
     pub(crate) origin: MsgSource,
     pub(crate) lines: Vec<String>,
+    pub(crate) is_feedback: bool,
 }
 
 #[derive(Deserialize)]
@@ -97,9 +98,11 @@ impl PendingRequests {
         let request = pending.remove(idx).unwrap();
         drop(pending);
 
+        let is_feedback = matches!(&response.outcome, Outcome::Error { .. });
         Some(LocalResponse {
             origin: request.origin,
             lines: format_response(response, &request.command_label),
+            is_feedback,
         })
     }
 
@@ -364,6 +367,7 @@ mod tests {
 
         assert_eq!(response.origin, channel("irc", "#second"));
         assert_eq!(response.lines, ["ets", "Moonshot", "└── North"]);
+        assert!(!response.is_feedback);
         assert_eq!(pending.origins(), [channel("irc", "#first")]);
     }
 
@@ -400,6 +404,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.lines, ["Could not contact the runtime."]);
+        assert!(response.is_feedback);
         assert!(pending.origins().is_empty());
     }
 
@@ -449,6 +454,7 @@ mod tests {
             );
             let response = pending.consume("irc", NICK, &packet).unwrap();
             assert_eq!(response.lines, expected, "{request}");
+            assert!(response.is_feedback, "{request}");
             assert!(response.lines.iter().all(|line| {
                 !line.contains("SledServ")
                     && !line.contains("invalid_command_syntax")
@@ -482,7 +488,25 @@ mod tests {
             );
             let response = pending.consume("irc", NICK, &packet).unwrap();
             assert_eq!(response.lines, [message]);
+            assert!(response.is_feedback, "{request}");
         }
+    }
+
+    #[test]
+    fn successful_state_change_remains_transcript_output() {
+        let pending = PendingRequests::default();
+        pending.record(channel("irc", "#commands"), "trail add supplies");
+
+        let response = pending
+            .consume(
+                "irc",
+                NICK,
+                r#"{"schema_version":1,"command":"travel.trail.add","status":"ok","data":null}"#,
+            )
+            .unwrap();
+
+        assert_eq!(response.lines, ["Sledteam travel.trail.add: ok"]);
+        assert!(!response.is_feedback);
     }
 
     #[test]

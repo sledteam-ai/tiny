@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::cognitive_complexity)]
 
+mod command_activity;
 mod command_completion;
 mod composer;
 pub mod config;
@@ -253,6 +254,7 @@ macro_rules! delegate {
 impl TUI {
     delegate!(draw());
     delegate!(set_command_completions(commands: &'static [libtiny_common::CommandInfo],));
+    delegate!(show_command_feedback(lines: &[String], target: &MsgTarget,));
     delegate!(new_server_tab(serv_name: &str, alias: Option<String>,));
     delegate!(close_server_tab(serv_name: &str,));
     delegate!(new_chan_tab(serv_name: &str, chan: &ChanNameRef,));

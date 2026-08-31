@@ -152,6 +152,7 @@ impl UI {
     delegate_ui!(draw());
     delegate_ui!(add_err_msg(msg: &str, ts: Tm, target: &MsgTarget,));
     delegate_ui!(add_client_err_msg(msg: &str, target: &MsgTarget,));
+    delegate_ui!(show_command_feedback(lines: &[String], target: &MsgTarget,));
     delegate_ui!(clear_nicks(serv: &str,));
     delegate_ui!(set_nick(serv: &str, nick: &str,));
     delegate_ui!(set_tab_style(style: TabStyle, target: &MsgTarget,));
@@ -180,8 +181,12 @@ impl UI {
             return false;
         };
         let target = response.origin.to_target();
-        for line in response.lines {
-            self.add_client_msg(&line, &target);
+        if response.is_feedback {
+            self.show_command_feedback(&response.lines, &target);
+        } else {
+            for line in response.lines {
+                self.add_client_msg(&line, &target);
+            }
         }
         true
     }

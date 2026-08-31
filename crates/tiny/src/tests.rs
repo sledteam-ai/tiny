@@ -510,6 +510,60 @@ fn test_sledserv_response_is_local_to_command_origin() {
 }
 
 #[test]
+fn incomplete_expedition_shows_usage_as_command_feedback() {
+    const HEIGHT: u16 = 12;
+    run_test_with_size(
+        "osa1".to_owned(),
+        DEFAULT_TUI_WIDTH,
+        HEIGHT,
+        |TestSetup {
+             tui,
+             snd_input_ev: _snd_input_ev,
+             snd_conn_ev,
+             ui,
+             ..
+         }| async move {
+            next_tab(&_snd_input_ev).await;
+            yield_(3).await;
+            ui.record_sledserv_request(
+                MsgSource::Serv {
+                    serv: SERV_NAME.to_owned(),
+                },
+                "expedition",
+            );
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: Some(Pfx::User {
+                        nick: "SledServ".to_owned(),
+                        user: "sledserv-service@localhost".to_owned(),
+                    }),
+                    cmd: Cmd::PRIVMSG {
+                        target: MsgTarget::User("osa1".to_owned()),
+                        msg: r#"{"schema_version":1,"command":"travel.expedition","status":"error","error":{"code":"invalid_command_syntax","message":"Invalid command syntax.","usage":["expedition add <name> --project-root <absolute-project-root>","expedition list"]}}"#.to_owned(),
+                        is_notice: false,
+                        ctcp: None,
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(5).await;
+
+            assert!(!_snd_input_ev.is_closed());
+            tui.draw();
+            let output = libtiny_tui::test_utils::buffer_str(
+                &tui.get_front_buffer(),
+                DEFAULT_TUI_WIDTH,
+                HEIGHT,
+            );
+            assert!(output.contains("Usage: /expedition add"), "{output:?}");
+            assert!(output.contains("/expedition list"), "{output:?}");
+            assert!(!output.contains("Invalid command syntax"), "{output:?}");
+        },
+    )
+}
+
+#[test]
 fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
     const HEIGHT: u16 = 12;
     run_test_with_size(
