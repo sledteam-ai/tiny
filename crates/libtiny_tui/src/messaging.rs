@@ -240,6 +240,8 @@ impl MessagingUI {
                     self.submit_composer()
                 } else if self.accept_command_completion() {
                     WidgetRet::KeyHandled
+                } else if self.input_field.text().starts_with('/') {
+                    WidgetRet::KeyHandled
                 } else {
                     self.open_composer();
                     WidgetRet::KeyHandled

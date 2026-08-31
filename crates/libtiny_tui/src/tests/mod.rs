@@ -23,12 +23,13 @@ fn single_line_tui(w: u16, h: u16) -> TUI {
     TUI::new_test(w, h)
 }
 
-static COMPLETION_COMMANDS: [CommandInfo; 5] = [
+static COMPLETION_COMMANDS: [CommandInfo; 6] = [
     CommandInfo::new("trail", "/trail <arg>", "Manage trails"),
     CommandInfo::new("travel", "/travel", "Travel somewhere"),
     CommandInfo::new("task", "/task", "Manage tasks"),
     CommandInfo::new("span", "/span <arg>", "Manage spans"),
     CommandInfo::new("shutdown", "/shutdown", "Shut down Sledteam"),
+    CommandInfo::new("expedition", "/expedition <arg>", "Manage expeditions"),
 ];
 
 fn completion_tui() -> TUI {
@@ -65,7 +66,14 @@ fn slash_opens_command_completion_and_ordinary_text_does_not() {
     enter_string(&mut tui, "/");
     assert_eq!(
         completion_names(&tui),
-        Some(vec!["trail", "travel", "task", "span", "shutdown"])
+        Some(vec![
+            "trail",
+            "travel",
+            "task",
+            "span",
+            "shutdown",
+            "expedition"
+        ])
     );
 }
 
@@ -94,7 +102,14 @@ fn command_completion_filters_by_prefix_and_backspace_widens_results() {
     tui.handle_input_event(Event::Key(Key::Backspace));
     assert_eq!(
         completion_names(&tui),
-        Some(vec!["trail", "travel", "task", "span", "shutdown"])
+        Some(vec![
+            "trail",
+            "travel",
+            "task",
+            "span",
+            "shutdown",
+            "expedition"
+        ])
     );
 }
 
@@ -144,7 +159,7 @@ fn command_completion_selects_first_match_and_navigates_with_wraparound() {
     tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Up)));
     assert_eq!(selected_completion_name(&tui), Some("trail"));
     tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Up)));
-    assert_eq!(selected_completion_name(&tui), Some("shutdown"));
+    assert_eq!(selected_completion_name(&tui), Some("expedition"));
     tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
     assert_eq!(selected_completion_name(&tui), Some("trail"));
 }
@@ -225,13 +240,38 @@ fn command_completion_tab_accepts_filtered_selection() {
 }
 
 #[test]
-fn unmatched_slash_input_still_opens_composer_on_tab() {
+fn accepted_command_keeps_tab_in_command_interface() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/ex");
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/expedition ");
+    assert_eq!(completion_names(&tui), None);
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/expedition ");
+}
+
+#[test]
+fn command_arguments_keep_tab_in_command_interface() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/expedition li");
+    assert_eq!(completion_names(&tui), None);
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/expedition li");
+}
+
+#[test]
+fn unmatched_slash_input_keeps_tab_in_command_interface() {
     let mut tui = completion_tui();
     enter_string(&mut tui, "/unknown");
     assert_eq!(completion_names(&tui), None);
 
     assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
-    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
     assert_eq!(tui.get_tabs()[1].widget.input_text(), "/unknown");
 }
 
