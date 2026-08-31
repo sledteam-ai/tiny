@@ -238,6 +238,8 @@ impl MessagingUI {
             KeyAction::InputFocusToggle if self.exit_dialogue.is_none() => {
                 if self.composer.is_some() {
                     self.submit_composer()
+                } else if self.accept_command_completion() {
+                    WidgetRet::KeyHandled
                 } else {
                     self.open_composer();
                     WidgetRet::KeyHandled
@@ -269,12 +271,7 @@ impl MessagingUI {
                 self.input_field.keypressed(key_action)
             }
             KeyAction::InputSend if self.exit_dialogue.is_none() && self.composer.is_none() => {
-                if let Some(completion) = &self.command_completion {
-                    let command = completion.selected_command();
-                    self.input_field
-                        .replace_text(&format!("/{} ", command.name));
-                    self.command_completion = None;
-                    self.resize(self.width, self.height);
+                if self.accept_command_completion() {
                     return WidgetRet::KeyHandled;
                 }
                 self.input_field.keypressed(key_action)
@@ -403,6 +400,22 @@ impl MessagingUI {
             None => None,
         };
         self.resize(self.width, self.height);
+    }
+
+    fn accept_command_completion(&mut self) -> bool {
+        let Some(command) = self
+            .command_completion
+            .as_ref()
+            .map(CommandCompletion::selected_command)
+        else {
+            return false;
+        };
+
+        self.input_field
+            .replace_text(&format!("/{} ", command.name));
+        self.command_completion = None;
+        self.resize(self.width, self.height);
+        true
     }
 
     #[cfg(test)]

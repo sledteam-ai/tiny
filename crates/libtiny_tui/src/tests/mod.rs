@@ -113,7 +113,7 @@ fn composer_never_shows_command_completion() {
     enter_string(&mut tui, "/");
     assert!(completion_names(&tui).is_some());
 
-    tui.handle_input_event(Event::Key(Key::Tab));
+    tui.handle_input_event(Event::String("composer\ntext".to_owned()));
     assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
     assert_eq!(completion_names(&tui), None);
     enter_string(&mut tui, "/trail");
@@ -185,6 +185,54 @@ fn command_completion_enter_accepts_without_executing() {
 
     enter_string(&mut tui, "later");
     assert_eq!(tui.get_tabs()[1].widget.input_text(), "/travel later");
+}
+
+#[test]
+fn command_completion_tab_accepts_initial_selection_and_restores_layout() {
+    let mut tui = completion_tui();
+    let initial_height = tui.get_tabs()[1].widget.msg_area_height();
+    enter_string(&mut tui, "/");
+    assert!(tui.get_tabs()[1].widget.msg_area_height() < initial_height);
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/trail ");
+    assert_eq!(completion_names(&tui), None);
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "single_line");
+    assert_eq!(tui.get_tabs()[1].widget.msg_area_height(), initial_height);
+}
+
+#[test]
+fn command_completion_tab_accepts_navigated_selection() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+    assert_eq!(selected_completion_name(&tui), Some("travel"));
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/travel ");
+    assert_eq!(completion_names(&tui), None);
+}
+
+#[test]
+fn command_completion_tab_accepts_filtered_selection() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/ta");
+    assert_eq!(completion_names(&tui), Some(vec!["task"]));
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/task ");
+    assert_eq!(completion_names(&tui), None);
+}
+
+#[test]
+fn unmatched_slash_input_still_opens_composer_on_tab() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/unknown");
+    assert_eq!(completion_names(&tui), None);
+
+    assert!(tui.handle_input_event(Event::Key(Key::Tab)).is_none());
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/unknown");
 }
 
 #[test]
