@@ -69,11 +69,11 @@ static SHUTDOWN_CMD: Cmd = Cmd {
     name: "shutdown",
     cmd_fn: shutdown,
     summary: "Shuts down the running Sledteam runtime",
-    usage: "`/shutdown sledteam`",
+    usage: "`/shutdown`",
 };
 
 fn shutdown(args: CmdArgs) {
-    if args.args != "sledteam" {
+    if !args.args.is_empty() {
         return args.ui.add_client_err_msg(
             &format!("Usage: {}", SHUTDOWN_CMD.usage),
             &MsgTarget::CurrentTab,

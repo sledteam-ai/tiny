@@ -659,9 +659,9 @@ fn test_parse_cmd() {
     assert_eq!(cmd.name, "span");
     assert_eq!(args, "add write schema");
 
-    let ParsedCmd { cmd, args } = parse_cmd("shutdown sledteam").unwrap();
+    let ParsedCmd { cmd, args } = parse_cmd("shutdown").unwrap();
     assert_eq!(cmd.name, "shutdown");
-    assert_eq!(args, "sledteam");
+    assert_eq!(args, "");
 
     // `/quit` remains owned by the TUI and must not be captured by client command aliases.
     assert!(parse_cmd("quit").is_none());
@@ -747,7 +747,7 @@ fn test_help_commands_are_local_and_grouped_by_ownership() {
             let tiny_heading = output.find("Tiny / IRC Commands:").unwrap();
             let sledteam_heading = output.find("Sledteam Commands:").unwrap();
             let quit_help = output.find("`/quit` or `/quit <reason>`").unwrap();
-            let shutdown_help = output.find("`/shutdown sledteam`").unwrap();
+            let shutdown_help = output.find("`/shutdown`").unwrap();
             assert!(tiny_heading < quit_help && quit_help < sledteam_heading);
             assert!(sledteam_heading < shutdown_help);
             for info in command_infos() {
@@ -865,14 +865,14 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
         assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/ets`"));
 
         run_cmd(
-            "shutdown tiny",
+            "shutdown sledteam",
             source.clone(),
             &defaults,
             &ui,
             &mut clients,
         );
         ui.draw();
-        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/shutdown sledteam`"));
+        assert!(buffer_str(&tui.get_front_buffer(), 40, 5).contains("Usage: `/shutdown`"));
 
         run_cmd("ets", source.clone(), &defaults, &ui, &mut clients);
         assert!(!ui.user_tab_exists("127.0.0.1", crate::sledserv::NICK));
@@ -925,15 +925,9 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
             &ui,
             &mut clients,
         );
+        run_cmd("shutdown", source.clone(), &defaults, &ui, &mut clients);
         run_cmd(
-            "shutdown sledteam",
-            source.clone(),
-            &defaults,
-            &ui,
-            &mut clients,
-        );
-        run_cmd(
-            "msg SledServ shutdown sledteam",
+            "msg SledServ shutdown",
             source.clone(),
             &defaults,
             &ui,
@@ -964,8 +958,8 @@ fn test_sledserv_aliases_match_msg_wire_actions() {
                 "PRIVMSG SledServ :trail add buy supplies".to_owned(),
                 "PRIVMSG SledServ :span add write schema".to_owned(),
                 "PRIVMSG SledServ :span add write schema".to_owned(),
-                "PRIVMSG SledServ :shutdown sledteam".to_owned(),
-                "PRIVMSG SledServ :shutdown sledteam".to_owned(),
+                "PRIVMSG SledServ :shutdown".to_owned(),
+                "PRIVMSG SledServ :shutdown".to_owned(),
             ]
         );
 

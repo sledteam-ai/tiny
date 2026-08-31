@@ -440,7 +440,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 Err(mpsc::error::TryRecvError::Empty)
             ));
 
-            ui.record_sledserv_request(origin, "shutdown sledteam");
+            ui.record_sledserv_request(origin, "shutdown");
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
                     tags: Vec::new(),
@@ -550,7 +550,7 @@ fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
                 MsgSource::Serv {
                     serv: SERV_NAME.to_owned(),
                 },
-                "shutdown sledteam",
+                "shutdown",
             );
             snd_conn_ev
                 .send(client::Event::Msg(Msg {

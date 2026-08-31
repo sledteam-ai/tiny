@@ -353,7 +353,7 @@ mod tests {
     fn shutdown_acknowledgement_uses_runtime_command_and_local_message() {
         let pending = PendingRequests::default();
         let origin = channel("irc", "#01J00000000000000000000000");
-        pending.record(origin.clone(), "shutdown sledteam");
+        pending.record(origin.clone(), "shutdown");
 
         let response = pending
             .consume(
@@ -371,10 +371,7 @@ mod tests {
     #[test]
     fn shutdown_error_uses_generic_structured_error_message() {
         let pending = PendingRequests::default();
-        pending.record(
-            channel("irc", "#01J00000000000000000000000"),
-            "shutdown sledteam",
-        );
+        pending.record(channel("irc", "#01J00000000000000000000000"), "shutdown");
 
         let response = pending
             .consume(
