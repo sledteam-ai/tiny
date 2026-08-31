@@ -1,6 +1,6 @@
 use std::panic::Location;
 
-use libtiny_common::{ChanName, ChanNameRef, MsgSource, MsgTarget};
+use libtiny_common::{ChanName, ChanNameRef, CommandInfo, MsgSource, MsgTarget};
 use term_input::{Arrow, Event, FKey, Key};
 
 use crate::key_map::KeyMap;
@@ -20,6 +20,119 @@ fn enter_string(tui: &mut TUI, s: &str) {
 
 fn single_line_tui(w: u16, h: u16) -> TUI {
     TUI::new_test(w, h)
+}
+
+static COMPLETION_COMMANDS: [CommandInfo; 5] = [
+    CommandInfo::new("trail", "/trail <arg>", "Manage trails"),
+    CommandInfo::new("travel", "/travel", "Travel somewhere"),
+    CommandInfo::new("task", "/task", "Manage tasks"),
+    CommandInfo::new("span", "/span <arg>", "Manage spans"),
+    CommandInfo::new("shutdown", "/shutdown", "Shut down Sledteam"),
+];
+
+fn completion_tui() -> TUI {
+    let mut tui = TUI::new_test(60, 14);
+    tui.set_command_completions(&COMPLETION_COMMANDS);
+    tui.new_server_tab("irc.example.org", None);
+    tui.next_tab();
+    tui
+}
+
+fn completion_names(tui: &TUI) -> Option<Vec<&'static str>> {
+    tui.get_tabs()[1]
+        .widget
+        .command_completion_matches()
+        .map(|commands| commands.into_iter().map(|command| command.name).collect())
+}
+
+#[test]
+fn slash_opens_command_completion_and_ordinary_text_does_not() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "hello");
+    assert_eq!(completion_names(&tui), None);
+
+    for _ in 0..5 {
+        tui.handle_input_event(Event::Key(Key::Backspace));
+    }
+    enter_string(&mut tui, "/");
+    assert_eq!(
+        completion_names(&tui),
+        Some(vec!["trail", "travel", "task", "span", "shutdown"])
+    );
+}
+
+#[test]
+fn command_completion_filters_by_prefix_and_backspace_widens_results() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/t");
+    assert_eq!(
+        completion_names(&tui),
+        Some(vec!["trail", "travel", "task"])
+    );
+
+    enter_string(&mut tui, "r");
+    assert_eq!(completion_names(&tui), Some(vec!["trail", "travel"]));
+
+    enter_string(&mut tui, "a");
+    assert_eq!(completion_names(&tui), Some(vec!["trail", "travel"]));
+
+    enter_string(&mut tui, "i");
+    assert_eq!(completion_names(&tui), Some(vec!["trail"]));
+
+    tui.handle_input_event(Event::Key(Key::Backspace));
+    assert_eq!(completion_names(&tui), Some(vec!["trail", "travel"]));
+    tui.handle_input_event(Event::Key(Key::Backspace));
+    tui.handle_input_event(Event::Key(Key::Backspace));
+    tui.handle_input_event(Event::Key(Key::Backspace));
+    assert_eq!(
+        completion_names(&tui),
+        Some(vec!["trail", "travel", "task", "span", "shutdown"])
+    );
+}
+
+#[test]
+fn command_completion_closes_after_command_name() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/trail");
+    assert_eq!(completion_names(&tui), Some(vec!["trail"]));
+    enter_string(&mut tui, " ");
+    assert_eq!(completion_names(&tui), None);
+}
+
+#[test]
+fn composer_never_shows_command_completion() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    assert!(completion_names(&tui).is_some());
+
+    tui.handle_input_event(Event::Key(Key::Tab));
+    assert_eq!(tui.get_tabs()[1].widget.input_focus(), "composer");
+    assert_eq!(completion_names(&tui), None);
+    enter_string(&mut tui, "/trail");
+    assert_eq!(completion_names(&tui), None);
+}
+
+#[test]
+fn command_completion_renders_commands_and_shared_descriptions() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/tr");
+    tui.draw();
+    let screen = buffer_str(&tui.get_front_buffer(), 60, 14);
+    assert!(screen.contains("/trail"));
+    assert!(screen.contains("Manage trails"));
+    assert!(screen.contains("/travel"));
+    assert!(screen.contains("Travel somewhere"));
+}
+
+#[test]
+fn opening_and_closing_completion_restores_message_area_height() {
+    let mut tui = completion_tui();
+    let initial_height = tui.get_tabs()[1].widget.msg_area_height();
+
+    enter_string(&mut tui, "/");
+    assert!(tui.get_tabs()[1].widget.msg_area_height() < initial_height);
+    tui.handle_input_event(Event::Key(Key::Backspace));
+    assert_eq!(tui.get_tabs()[1].widget.msg_area_height(), initial_height);
 }
 
 #[test]

@@ -131,6 +131,13 @@ impl InputArea {
         self.nick.as_ref().map(|nick| nick.value.clone())
     }
 
+    pub(crate) fn text(&self) -> String {
+        match self.mode {
+            Mode::Edit | Mode::Autocomplete { .. } => self.buffer.get_buffer().iter().collect(),
+            Mode::History(idx) => self.history[idx as usize].get_buffer().iter().collect(),
+        }
+    }
+
     /// Resizes input area
     pub(crate) fn resize(&mut self, width: i32, max_lines: i32) {
         self.width = width;

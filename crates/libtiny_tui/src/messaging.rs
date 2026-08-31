@@ -4,6 +4,7 @@ use std::convert::From;
 
 use time::{self, Tm};
 
+use crate::command_completion::CommandCompletion;
 use crate::composer::Composer;
 use crate::config::Colors;
 use crate::exit_dialogue::ExitDialogue;
@@ -13,6 +14,7 @@ use crate::msg_area::line::SegStyle;
 use crate::msg_area::{Layout, MsgArea};
 use crate::trie::Trie;
 use crate::widget::WidgetRet;
+use libtiny_common::CommandInfo;
 
 /// An input field and an area for showing messages and activities of a tab (channel, server,
 /// mentions tab).
@@ -25,6 +27,11 @@ pub(crate) struct MessagingUI {
 
     /// The transient auxiliary input pane. `None` means normal Tiny input mode.
     composer: Option<Composer>,
+
+    /// Slash-command matches shown in the same auxiliary region as the composer.
+    command_completion: Option<CommandCompletion>,
+
+    command_infos: &'static [CommandInfo],
 
     exit_dialogue: Option<ExitDialogue>,
 
@@ -104,6 +111,8 @@ impl MessagingUI {
             msg_area: MsgArea::new(width, height - input_height, scrollback, msg_layout),
             input_field,
             composer: None,
+            command_completion: None,
+            command_infos: &[],
             exit_dialogue: None,
             width,
             height,
@@ -137,8 +146,8 @@ impl MessagingUI {
                 exit_dialogue.draw(tb, colors, pos_x, self.height - 1);
             }
             None => {
-                let composer_height = self.composer_height();
-                let single_line_region_height = self.height - composer_height;
+                let auxiliary_height = self.auxiliary_height();
+                let single_line_region_height = self.height - auxiliary_height;
                 // Draw InputArea first because it can trigger a resize of MsgArea.
                 self.input_field.draw(
                     tb,
@@ -155,8 +164,17 @@ impl MessagingUI {
                         pos_x,
                         pos_y + single_line_region_height,
                         self.width,
-                        composer_height,
+                        auxiliary_height,
                         true,
+                    );
+                } else if let Some(completion) = &self.command_completion {
+                    completion.draw(
+                        tb,
+                        colors,
+                        pos_x,
+                        pos_y + single_line_region_height,
+                        self.width,
+                        auxiliary_height,
                     );
                 }
             }
@@ -247,6 +265,7 @@ impl MessagingUI {
                 WidgetRet::KeyHandled
             }
             key_action => {
+                let normal_input = self.composer.is_none() && self.exit_dialogue.is_none();
                 let ret = {
                     if let Some(exit_dialogue) = self.exit_dialogue.as_ref() {
                         exit_dialogue.keypressed(key_action)
@@ -257,6 +276,10 @@ impl MessagingUI {
                         }
                     }
                 };
+
+                if normal_input {
+                    self.update_command_completion();
+                }
 
                 if let WidgetRet::Remove = ret {
                     self.exit_dialogue = None;
@@ -274,8 +297,8 @@ impl MessagingUI {
 
         self.input_field
             .resize(width, get_input_field_max_height(height));
-        let composer_height = self.composer_height();
-        let input_height = self.input_field.get_height(width) + composer_height;
+        let auxiliary_height = self.auxiliary_height();
+        let input_height = self.input_field.get_height(width) + auxiliary_height;
         let msg_area_height = height - input_height;
         self.msg_area.resize(width, msg_area_height);
 
@@ -316,8 +339,38 @@ impl MessagingUI {
         }
     }
 
+    fn auxiliary_height(&self) -> i32 {
+        if let Some(composer) = &self.command_completion {
+            composer.height(self.height)
+        } else {
+            self.composer_height()
+        }
+    }
+
+    pub(crate) fn set_command_completions(&mut self, commands: &'static [CommandInfo]) {
+        self.command_infos = commands;
+        self.update_command_completion();
+    }
+
+    fn update_command_completion(&mut self) {
+        let text = self.input_field.text();
+        self.command_completion = text
+            .strip_prefix('/')
+            .filter(|prefix| !prefix.chars().any(char::is_whitespace))
+            .and_then(|prefix| CommandCompletion::new(self.command_infos, prefix));
+        self.resize(self.width, self.height);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn command_completion_matches(&self) -> Option<Vec<CommandInfo>> {
+        self.command_completion
+            .as_ref()
+            .map(CommandCompletion::matches)
+    }
+
     fn open_composer(&mut self) {
         if self.composer.is_none() {
+            self.command_completion = None;
             self.composer = Some(Composer::new());
             self.resize(self.width, self.height);
         }
@@ -325,7 +378,7 @@ impl MessagingUI {
 
     fn close_composer(&mut self) {
         self.composer = None;
-        self.resize(self.width, self.height);
+        self.update_command_completion();
     }
 
     fn submit_composer(&mut self) -> WidgetRet {

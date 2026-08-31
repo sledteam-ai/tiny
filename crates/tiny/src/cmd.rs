@@ -176,9 +176,9 @@ fn print_command_infos(ui: &UI, infos: impl Iterator<Item = CommandInfo>) {
 }
 
 fn print_sledteam_help(ui: &UI) {
-    fn entry(ui: &UI, usage: &str, description: &str) {
+    fn entry(ui: &UI, info: CommandInfo) {
         ui.add_client_msg(
-            &format!("{usage:<33} - {description}"),
+            &format!("{:<33} - {}", info.usage, info.summary),
             &MsgTarget::CurrentTab,
         );
     }
@@ -187,30 +187,29 @@ fn print_sledteam_help(ui: &UI) {
         ui.add_client_msg(&format!("\x02{heading}\x0f"), &MsgTarget::CurrentTab);
     }
 
-    entry(ui, "/help, /?", "Show Sledteam commands");
+    let commands = crate::command_metadata::sledteam_commands();
+    let command = |name| *commands.iter().find(|info| info.name == name).unwrap();
+
+    entry(ui, command("help"));
 
     ui.add_client_msg("", &MsgTarget::CurrentTab);
     heading(ui, "Terrain");
-    entry(ui, "/ets", "Show journey position (expedition/trail/spans)");
-    entry(ui, "/expedition <arg>", "Manage expeditions");
-    entry(ui, "/trail <arg>", "Manage trails");
-    entry(ui, "/span <arg>", "Manage spans");
+    entry(ui, command("ets"));
+    entry(ui, command("expedition"));
+    entry(ui, command("trail"));
+    entry(ui, command("span"));
 
     ui.add_client_msg("", &MsgTarget::CurrentTab);
     heading(ui, "Session");
-    entry(ui, "/clear", "Clear screen above cursor");
-    entry(ui, "/switch <tab>", "Switch to another named tab");
-    entry(ui, "/close [reason]", "Close the current tab");
-    entry(
-        ui,
-        "/quit [reason]",
-        "Exit this Sled session without shutting down Sledteam",
-    );
+    entry(ui, command("clear"));
+    entry(ui, command("switch"));
+    entry(ui, command("close"));
+    entry(ui, command("quit"));
 
     ui.add_client_msg("", &MsgTarget::CurrentTab);
     heading(ui, "Sled");
-    entry(ui, "/reload", "Reload configuration");
-    entry(ui, "/shutdown", "Shut down the Sledteam system");
+    entry(ui, command("reload"));
+    entry(ui, command("shutdown"));
 }
 
 fn print_full_help(ui: &UI) {
@@ -837,6 +836,37 @@ fn test_help_views_are_curated_and_full_commands_remain_executable() {
         assert_eq!(help_output, alias_output);
         assert!(!help_output.contains("Sledteam Commands:"));
         assert!(!help_output.contains("Tiny / IRC Commands:"));
+
+        for info in crate::command_metadata::sledteam_commands() {
+            assert!(
+                help_output.contains(info.summary),
+                "/help did not use the shared description for /{}",
+                info.name
+            );
+        }
+
+        let curated_names = crate::command_metadata::sledteam_commands()
+            .iter()
+            .map(|info| info.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            curated_names,
+            [
+                "help",
+                "ets",
+                "expedition",
+                "trail",
+                "span",
+                "clear",
+                "switch",
+                "close",
+                "quit",
+                "reload",
+                "shutdown",
+            ]
+        );
+        assert!(!curated_names.contains(&"join"));
+        assert!(!curated_names.contains(&"ignore"));
 
         let expected_help = [
             "/help, /?                         - Show Sledteam commands",

@@ -2,6 +2,7 @@
 
 mod cli;
 mod cmd;
+mod command_metadata;
 mod config;
 mod conn;
 mod debug_logging;
@@ -133,6 +134,7 @@ fn run(
     local.block_on(&runtime, async move {
         // Create TUI task
         let (tui, rcv_tui_ev) = TUI::run(config_path.clone());
+        tui.set_command_completions(command_metadata::sledteam_commands());
         tui.draw();
 
         // Create logger

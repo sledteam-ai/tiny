@@ -92,6 +92,8 @@ pub struct TUI {
     tab_configs: TabConfigs,
 
     navigation_dialog_visible: bool,
+
+    command_completions: &'static [CommandInfo],
 }
 
 pub(crate) enum CmdResult {
@@ -172,6 +174,7 @@ impl TUI {
             config_path,
             tab_configs: TabConfigs::default(),
             navigation_dialog_visible: false,
+            command_completions: &[],
         };
 
         // Init "mentions" tab. This needs to happen right after creating the TUI to be able to
@@ -441,6 +444,16 @@ impl TUI {
                 switch,
             },
         );
+        self.tabs[idx]
+            .widget
+            .set_command_completions(self.command_completions);
+    }
+
+    pub fn set_command_completions(&mut self, commands: &'static [CommandInfo]) {
+        self.command_completions = commands;
+        for tab in &mut self.tabs {
+            tab.widget.set_command_completions(commands);
+        }
     }
 
     fn hide_server_tab(&mut self, serv: &str) {
