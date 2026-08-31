@@ -45,32 +45,6 @@ impl CommandCompletion {
             return;
         }
 
-        let border = colors.faded;
-        if width == 1 || height == 1 {
-            for x in 0..width {
-                tb.change_cell(pos_x + x, pos_y, '─', border.fg, border.bg);
-            }
-            return;
-        }
-
-        tb.change_cell(pos_x, pos_y, '┌', border.fg, border.bg);
-        tb.change_cell(pos_x + width - 1, pos_y, '┐', border.fg, border.bg);
-        tb.change_cell(pos_x, pos_y + height - 1, '└', border.fg, border.bg);
-        tb.change_cell(
-            pos_x + width - 1,
-            pos_y + height - 1,
-            '┘',
-            border.fg,
-            border.bg,
-        );
-        for x in 1..width - 1 {
-            tb.change_cell(pos_x + x, pos_y, '─', border.fg, border.bg);
-            tb.change_cell(pos_x + x, pos_y + height - 1, '─', border.fg, border.bg);
-        }
-        for y in 1..height - 1 {
-            tb.change_cell(pos_x, pos_y + y, '│', border.fg, border.bg);
-            tb.change_cell(pos_x + width - 1, pos_y + y, '│', border.fg, border.bg);
-        }
         if width <= 2 || height <= 2 {
             return;
         }

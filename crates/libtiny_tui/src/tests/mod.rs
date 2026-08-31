@@ -122,6 +122,7 @@ fn command_completion_renders_commands_and_shared_descriptions() {
     assert!(screen.contains("Manage trails"));
     assert!(screen.contains("/travel"));
     assert!(screen.contains("Travel somewhere"));
+    assert!(!screen.chars().any(|ch| "─│┌┐└┘".contains(ch)));
 }
 
 #[test]
