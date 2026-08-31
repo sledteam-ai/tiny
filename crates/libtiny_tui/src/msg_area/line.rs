@@ -35,6 +35,7 @@ pub(crate) enum SegStyle {
 
     // Rest of the styles are from the color scheme
     UserMsg,
+    UserMsgWithAttrs(u16),
     ErrMsg,
     Topic,
     Join,
@@ -55,6 +56,10 @@ impl StyledString {
                 bg: colors.user_msg.bg,
             },
             UserMsg => colors.user_msg,
+            UserMsgWithAttrs(attrs) => Style {
+                fg: colors.user_msg.fg | attrs,
+                bg: colors.user_msg.bg,
+            },
             ErrMsg => colors.err_msg,
             Topic => colors.topic,
             Join => colors.join,
@@ -110,17 +115,19 @@ impl Line {
     }
 
     fn add_attr(&mut self, attr: u16) {
-        if let SegStyle::Fixed(style) = self.current_seg.style {
-            self.set_message_style(SegStyle::Fixed(Style {
+        match self.current_seg.style {
+            SegStyle::Fixed(style) => self.set_message_style(SegStyle::Fixed(Style {
                 fg: style.fg | attr,
                 bg: style.bg,
-            }))
-        } else {
-            let style = SegStyle::Fixed(Style {
+            })),
+            SegStyle::UserMsg => self.set_message_style(SegStyle::UserMsgWithAttrs(attr)),
+            SegStyle::UserMsgWithAttrs(attrs) => {
+                self.set_message_style(SegStyle::UserMsgWithAttrs(attrs | attr))
+            }
+            _ => self.set_message_style(SegStyle::Fixed(Style {
                 fg: termbox_simple::TB_DEFAULT | attr,
                 bg: termbox_simple::TB_DEFAULT,
-            });
-            self.set_message_style(style)
+            })),
         }
     }
 

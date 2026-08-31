@@ -128,32 +128,6 @@ fn commands() -> impl Iterator<Item = &'static Cmd> {
     TINY_IRC_CMDS.into_iter().chain(sledteam::commands())
 }
 
-fn full_command_infos() -> impl Iterator<Item = CommandInfo> {
-    libtiny_tui::command_infos()
-        .iter()
-        .copied()
-        .chain(commands().map(|cmd| cmd.info()))
-}
-
-static SLEDTEAM_HELP_COMMANDS: [&str; 12] = [
-    "quit",
-    "clear",
-    "switch",
-    "reload",
-    "close",
-    "help",
-    "?",
-    "ets",
-    "expedition",
-    "trail",
-    "span",
-    "shutdown",
-];
-
-fn sledteam_command_infos() -> impl Iterator<Item = CommandInfo> {
-    full_command_infos().filter(|info| SLEDTEAM_HELP_COMMANDS.contains(&info.name))
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static CMDS_CMD: Cmd = Cmd {
@@ -202,8 +176,41 @@ fn print_command_infos(ui: &UI, infos: impl Iterator<Item = CommandInfo>) {
 }
 
 fn print_sledteam_help(ui: &UI) {
-    ui.add_client_msg("Sledteam Commands:", &MsgTarget::CurrentTab);
-    print_command_infos(ui, sledteam_command_infos());
+    fn entry(ui: &UI, usage: &str, description: &str) {
+        ui.add_client_msg(
+            &format!("{usage:<33} - {description}"),
+            &MsgTarget::CurrentTab,
+        );
+    }
+
+    fn heading(ui: &UI, heading: &str) {
+        ui.add_client_msg(&format!("\x02{heading}\x0f"), &MsgTarget::CurrentTab);
+    }
+
+    entry(ui, "/help, /?", "Show Sledteam commands");
+
+    ui.add_client_msg("", &MsgTarget::CurrentTab);
+    heading(ui, "Terrain");
+    entry(ui, "/ets", "Show journey position (expedition/trail/spans)");
+    entry(ui, "/expedition <arg>", "Manage expeditions");
+    entry(ui, "/trail <arg>", "Manage trails");
+    entry(ui, "/span <arg>", "Manage spans");
+
+    ui.add_client_msg("", &MsgTarget::CurrentTab);
+    heading(ui, "Session");
+    entry(ui, "/clear", "Clear screen above cursor");
+    entry(ui, "/switch <tab>", "Switch to another named tab");
+    entry(ui, "/close [reason]", "Close the current tab");
+    entry(
+        ui,
+        "/quit [reason]",
+        "Exit this Sled session without shutting down Sledteam",
+    );
+
+    ui.add_client_msg("", &MsgTarget::CurrentTab);
+    heading(ui, "Sled");
+    entry(ui, "/reload", "Reload configuration");
+    entry(ui, "/shutdown", "Shut down the Sledteam system");
 }
 
 fn print_full_help(ui: &UI) {
@@ -728,7 +735,11 @@ fn unknown_top_level_command_error_is_concise() {
 fn test_command_metadata() {
     use std::collections::HashSet;
 
-    let infos = full_command_infos().collect::<Vec<_>>();
+    let infos = libtiny_tui::command_infos()
+        .iter()
+        .copied()
+        .chain(commands().map(|cmd| cmd.info()))
+        .collect::<Vec<_>>();
     let mut names = HashSet::new();
     for info in &infos {
         assert!(names.insert(info.name), "duplicate command: {}", info.name);
@@ -784,6 +795,13 @@ fn test_help_views_are_curated_and_full_commands_remain_executable() {
             tls: false,
         };
 
+        let command_infos = || {
+            libtiny_tui::command_infos()
+                .iter()
+                .copied()
+                .chain(commands().map(|cmd| cmd.info()))
+        };
+
         let render_help = |command: &str| {
             let (snd_input, rcv_input) = mpsc::channel(1);
             let input = ReceiverStream::new(rcv_input).map(Ok);
@@ -806,33 +824,63 @@ fn test_help_views_are_curated_and_full_commands_remain_executable() {
             );
             ui.draw();
 
-            let output = buffer_str(&tui.get_front_buffer(), 160, 60);
+            let buffer = tui.get_front_buffer();
+            let output = buffer_str(&buffer, 160, 60);
             drop(snd_input);
-            output
+            (output, buffer)
         };
 
         // An empty client list also verifies that these local commands do not use the IRC send
         // path, which requires a client for the current server.
-        let help_output = render_help("help");
-        let alias_output = render_help("?");
+        let (help_output, help_buffer) = render_help("help");
+        let (alias_output, _) = render_help("?");
         assert_eq!(help_output, alias_output);
-        assert!(help_output.contains("Sledteam Commands:"));
+        assert!(!help_output.contains("Sledteam Commands:"));
         assert!(!help_output.contains("Tiny / IRC Commands:"));
-        for info in full_command_infos() {
-            let rendered = format!("{:<45} - {}", info.usage, info.summary);
-            assert_eq!(
-                help_output.contains(&rendered),
-                SLEDTEAM_HELP_COMMANDS.contains(&info.name),
-                "unexpected curated help visibility for {}",
-                info.name
-            );
-        }
-        assert!(!help_output.contains("`/??`"));
 
-        let full_output = render_help("??");
+        let expected_help = [
+            "/help, /?                         - Show Sledteam commands",
+            "Terrain",
+            "/ets                              - Show journey position (expedition/trail/spans)",
+            "/expedition <arg>                 - Manage expeditions",
+            "/trail <arg>                      - Manage trails",
+            "/span <arg>                       - Manage spans",
+            "Session",
+            "/clear                            - Clear screen above cursor",
+            "/switch <tab>                     - Switch to another named tab",
+            "/close [reason]                   - Close the current tab",
+            "/quit [reason]                    - Exit this Sled session without shutting down Sledteam",
+            "Sled",
+            "/reload                           - Reload configuration",
+            "/shutdown                         - Shut down the Sledteam system",
+        ];
+        let mut previous = 0;
+        for expected in expected_help {
+            let position = help_output[previous..]
+                .find(expected)
+                .unwrap_or_else(|| {
+                    panic!("missing curated help line: {expected}; output: {help_output:?}")
+                });
+            previous += position + expected.len();
+        }
+
+        for heading in ["Terrain", "Session", "Sled"] {
+            let row = help_output
+                .lines()
+                .position(|line| line.trim_end() == heading)
+                .unwrap();
+            let cell = help_buffer.cells[row * 160];
+            let normal_help_cell = help_buffer.cells[(row + 1) * 160];
+            assert_eq!(cell.ch, heading.chars().next().unwrap());
+            assert_eq!(cell.fg, normal_help_cell.fg | termbox_simple::TB_BOLD);
+            assert_eq!(cell.bg, normal_help_cell.bg);
+        }
+        assert!(!help_output.contains("/??"));
+
+        let (full_output, _) = render_help("??");
         assert!(full_output.contains("Tiny / IRC Commands:"));
         assert!(full_output.contains("Sledteam Commands:"));
-        for info in full_command_infos() {
+        for info in command_infos() {
             assert!(
                 full_output.contains(&format!("{:<45} - {}", info.usage, info.summary)),
                 "missing command output for {} from /??",
@@ -845,7 +893,7 @@ fn test_help_views_are_curated_and_full_commands_remain_executable() {
                 parse_cmd(command).is_some(),
                 "/{command} is no longer executable"
             );
-            let info = full_command_infos()
+            let info = command_infos()
                 .find(|info| info.name == command)
                 .unwrap();
             let rendered = format!("{:<45} - {}", info.usage, info.summary);
@@ -860,7 +908,7 @@ fn test_help_views_are_curated_and_full_commands_remain_executable() {
                     .any(|info| info.name == command),
                 "/{command} is no longer executable by the TUI"
             );
-            let info = full_command_infos()
+            let info = command_infos()
                 .find(|info| info.name == command)
                 .unwrap();
             let rendered = format!("{:<45} - {}", info.usage, info.summary);
