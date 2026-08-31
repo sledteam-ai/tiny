@@ -1,5 +1,5 @@
 use libtiny_common::CommandInfo;
-use termbox_simple::Termbox;
+use termbox_simple::{TB_BOLD, Termbox};
 
 use crate::config::Colors;
 use crate::termbox;
@@ -8,6 +8,7 @@ use crate::termbox;
 pub(crate) struct CommandCompletion {
     commands: &'static [CommandInfo],
     matching: Vec<usize>,
+    selected: usize,
 }
 
 impl CommandCompletion {
@@ -17,7 +18,46 @@ impl CommandCompletion {
             .enumerate()
             .filter_map(|(idx, command)| command.name.starts_with(prefix).then_some(idx))
             .collect::<Vec<_>>();
-        (!matching.is_empty()).then_some(Self { commands, matching })
+        (!matching.is_empty()).then_some(Self {
+            commands,
+            matching,
+            selected: 0,
+        })
+    }
+
+    pub(crate) fn update(&mut self, prefix: &str) -> bool {
+        let selected_command = self.matching.get(self.selected).copied();
+        self.matching = self
+            .commands
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, command)| command.name.starts_with(prefix).then_some(idx))
+            .collect();
+
+        if self.matching.is_empty() {
+            return false;
+        }
+
+        self.selected = selected_command
+            .and_then(|selected| self.matching.iter().position(|idx| *idx == selected))
+            .unwrap_or_else(|| self.selected.min(self.matching.len() - 1));
+        true
+    }
+
+    pub(crate) fn select_previous(&mut self) {
+        self.selected = if self.selected == 0 {
+            self.matching.len() - 1
+        } else {
+            self.selected - 1
+        };
+    }
+
+    pub(crate) fn select_next(&mut self) {
+        self.selected = (self.selected + 1) % self.matching.len();
+    }
+
+    pub(crate) fn selected_command(&self) -> CommandInfo {
+        self.commands[self.matching[self.selected]]
     }
 
     pub(crate) fn height(&self, parent_height: i32) -> i32 {
@@ -30,6 +70,11 @@ impl CommandCompletion {
             .iter()
             .map(|idx| self.commands[*idx])
             .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selected(&self) -> CommandInfo {
+        self.selected_command()
     }
 
     pub(crate) fn draw(
@@ -58,14 +103,29 @@ impl CommandCompletion {
             .max()
             .unwrap_or(0)
             .min((content_width as usize) / 2);
-        for (row, idx) in self.matching.iter().take(visible_rows).enumerate() {
+        let first_visible = self.selected.saturating_sub(visible_rows.saturating_sub(1));
+        for (row, (match_idx, idx)) in self
+            .matching
+            .iter()
+            .enumerate()
+            .skip(first_visible)
+            .take(visible_rows)
+            .enumerate()
+        {
             let command = self.commands[*idx];
             let label = format!("/{:<command_width$} ", command.name);
+            let selected = match_idx == self.selected;
+            let mut command_style = colors.user_msg;
+            let mut summary_style = colors.faded;
+            if selected {
+                command_style.fg |= TB_BOLD;
+                summary_style.fg |= TB_BOLD;
+            }
             let x = termbox::print_chars(
                 tb,
                 pos_x + 1,
                 pos_y + 1 + row as i32,
-                colors.user_msg,
+                command_style,
                 label.chars().take(content_width as usize),
             );
             if x < pos_x + width - 1 {
@@ -73,7 +133,7 @@ impl CommandCompletion {
                     tb,
                     x,
                     pos_y + 1 + row as i32,
-                    colors.faded,
+                    summary_style,
                     command
                         .summary
                         .chars()

@@ -2,6 +2,7 @@ use std::panic::Location;
 
 use libtiny_common::{ChanName, ChanNameRef, CommandInfo, MsgSource, MsgTarget};
 use term_input::{Arrow, Event, FKey, Key};
+use termbox_simple::TB_BOLD;
 
 use crate::key_map::KeyMap;
 use crate::test_utils::{buffer_str, expect_screen};
@@ -43,6 +44,13 @@ fn completion_names(tui: &TUI) -> Option<Vec<&'static str>> {
         .widget
         .command_completion_matches()
         .map(|commands| commands.into_iter().map(|command| command.name).collect())
+}
+
+fn selected_completion_name(tui: &TUI) -> Option<&'static str> {
+    tui.get_tabs()[1]
+        .widget
+        .selected_command_completion()
+        .map(|command| command.name)
 }
 
 #[test]
@@ -123,6 +131,85 @@ fn command_completion_renders_commands_and_shared_descriptions() {
     assert!(screen.contains("/travel"));
     assert!(screen.contains("Travel somewhere"));
     assert!(!screen.chars().any(|ch| "─│┌┐└┘".contains(ch)));
+}
+
+#[test]
+fn command_completion_selects_first_match_and_navigates_with_wraparound() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    assert_eq!(selected_completion_name(&tui), Some("trail"));
+
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+    assert_eq!(selected_completion_name(&tui), Some("travel"));
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Up)));
+    assert_eq!(selected_completion_name(&tui), Some("trail"));
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Up)));
+    assert_eq!(selected_completion_name(&tui), Some("shutdown"));
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+    assert_eq!(selected_completion_name(&tui), Some("trail"));
+}
+
+#[test]
+fn command_completion_selected_row_is_bold() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+    tui.draw();
+
+    let buffer = tui.get_front_buffer();
+    let chars = buffer.cells.iter().map(|cell| cell.ch).collect::<Vec<_>>();
+    let selected = chars
+        .windows("/travel".len())
+        .position(|chars| chars.iter().copied().eq("/travel".chars()))
+        .unwrap();
+    let unselected = chars
+        .windows("/trail".len())
+        .position(|chars| chars.iter().copied().eq("/trail".chars()))
+        .unwrap();
+    assert_ne!(buffer.cells[selected].fg & TB_BOLD, 0);
+    assert_eq!(buffer.cells[unselected].fg & TB_BOLD, 0);
+}
+
+#[test]
+fn command_completion_enter_accepts_without_executing() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+
+    assert!(
+        tui.handle_input_event(Event::Key(Key::Char('\r')))
+            .is_none()
+    );
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/travel ");
+    assert_eq!(completion_names(&tui), None);
+
+    enter_string(&mut tui, "later");
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), "/travel later");
+}
+
+#[test]
+fn command_completion_filtering_preserves_or_clamps_selection() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/");
+    tui.handle_input_event(Event::Key(Key::Arrow(Arrow::Down)));
+    assert_eq!(selected_completion_name(&tui), Some("travel"));
+
+    enter_string(&mut tui, "tr");
+    assert_eq!(selected_completion_name(&tui), Some("travel"));
+    enter_string(&mut tui, "ai");
+    assert_eq!(completion_names(&tui), Some(vec!["trail"]));
+    assert_eq!(selected_completion_name(&tui), Some("trail"));
+}
+
+#[test]
+fn command_completion_escape_dismisses_without_changing_input() {
+    let mut tui = completion_tui();
+    enter_string(&mut tui, "/tr");
+    let input = tui.get_tabs()[1].widget.input_text();
+
+    tui.handle_input_event(Event::Key(Key::Esc));
+    assert_eq!(completion_names(&tui), None);
+    assert_eq!(tui.get_tabs()[1].widget.input_text(), input);
 }
 
 #[test]

@@ -250,6 +250,44 @@ impl MessagingUI {
             KeyAction::ComposerSend if self.exit_dialogue.is_none() && self.composer.is_some() => {
                 self.submit_composer()
             }
+            KeyAction::InputPrevEntry
+                if self.exit_dialogue.is_none() && self.composer.is_none() =>
+            {
+                if let Some(completion) = &mut self.command_completion {
+                    completion.select_previous();
+                    return WidgetRet::KeyHandled;
+                }
+                self.input_field.keypressed(key_action)
+            }
+            KeyAction::InputNextEntry
+                if self.exit_dialogue.is_none() && self.composer.is_none() =>
+            {
+                if let Some(completion) = &mut self.command_completion {
+                    completion.select_next();
+                    return WidgetRet::KeyHandled;
+                }
+                self.input_field.keypressed(key_action)
+            }
+            KeyAction::InputSend if self.exit_dialogue.is_none() && self.composer.is_none() => {
+                if let Some(completion) = &self.command_completion {
+                    let command = completion.selected_command();
+                    self.input_field
+                        .replace_text(&format!("/{} ", command.name));
+                    self.command_completion = None;
+                    self.resize(self.width, self.height);
+                    return WidgetRet::KeyHandled;
+                }
+                self.input_field.keypressed(key_action)
+            }
+            KeyAction::Cancel
+                if self.exit_dialogue.is_none()
+                    && self.composer.is_none()
+                    && self.command_completion.is_some() =>
+            {
+                self.command_completion = None;
+                self.resize(self.width, self.height);
+                WidgetRet::KeyHandled
+            }
             KeyAction::Cancel if self.exit_dialogue.is_none() && self.composer.is_some() => {
                 self.close_composer();
                 WidgetRet::KeyHandled
@@ -354,10 +392,16 @@ impl MessagingUI {
 
     fn update_command_completion(&mut self) {
         let text = self.input_field.text();
-        self.command_completion = text
+        let prefix = text
             .strip_prefix('/')
-            .filter(|prefix| !prefix.chars().any(char::is_whitespace))
-            .and_then(|prefix| CommandCompletion::new(self.command_infos, prefix));
+            .filter(|prefix| !prefix.chars().any(char::is_whitespace));
+        self.command_completion = match prefix {
+            Some(prefix) => match self.command_completion.take() {
+                Some(mut completion) => completion.update(prefix).then_some(completion),
+                None => CommandCompletion::new(self.command_infos, prefix),
+            },
+            None => None,
+        };
         self.resize(self.width, self.height);
     }
 
@@ -366,6 +410,18 @@ impl MessagingUI {
         self.command_completion
             .as_ref()
             .map(CommandCompletion::matches)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selected_command_completion(&self) -> Option<CommandInfo> {
+        self.command_completion
+            .as_ref()
+            .map(CommandCompletion::selected)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn input_text(&self) -> String {
+        self.input_field.text()
     }
 
     fn open_composer(&mut self) {

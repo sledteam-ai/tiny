@@ -138,6 +138,13 @@ impl InputArea {
         }
     }
 
+    pub(crate) fn replace_text(&mut self, text: &str) {
+        self.mode = Mode::Edit;
+        self.buffer = InputLine::from_buffer(text.chars().collect());
+        self.height = None;
+        self.move_cursor_to_end();
+    }
+
     /// Resizes input area
     pub(crate) fn resize(&mut self, width: i32, max_lines: i32) {
         self.width = width;
@@ -348,10 +355,7 @@ impl InputArea {
 
     #[cfg(test)]
     pub(crate) fn set(&mut self, str: &str) {
-        self.mode = Mode::Edit;
-        self.buffer = InputLine::from_buffer(str.chars().collect());
-        self.height = None;
-        self.move_cursor_to_end();
+        self.replace_text(str);
     }
 
     fn consume_word_before_curs(&mut self) {
