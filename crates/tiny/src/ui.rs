@@ -179,16 +179,17 @@ impl UI {
         let Some(response) = self.sledserv_requests.consume(serv, sender, msg) else {
             return false;
         };
-        if response.intentional_shutdown {
-            self.intentional_shutdowns
-                .borrow_mut()
-                .insert(serv.to_owned());
-        }
         let target = response.origin.to_target();
         for line in response.lines {
             self.add_client_msg(&line, &target);
         }
         true
+    }
+
+    pub(crate) fn mark_intentional_shutdown(&self, serv: &str) {
+        self.intentional_shutdowns
+            .borrow_mut()
+            .insert(serv.to_owned());
     }
 
     pub(crate) fn take_intentional_shutdown(&self, serv: &str) -> bool {

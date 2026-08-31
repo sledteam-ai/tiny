@@ -14,6 +14,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use std::time::Duration;
 
 const INTENTIONAL_SHUTDOWN_LINGER: Duration = Duration::from_millis(600);
+const SLEDTEAM_SHUTDOWN_ERROR: &str = "SLEDTEAM_SHUTDOWN Sledteam runtime is shutting down";
 
 pub(crate) trait Client {
     fn get_serv_name(&self) -> &str;
@@ -522,6 +523,9 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
         }
 
         ERROR { msg } => {
+            if msg == SLEDTEAM_SHUTDOWN_ERROR {
+                ui.mark_intentional_shutdown(serv);
+            }
             ui.add_err_msg(&msg, time::now(), &MsgTarget::AllServTabs { serv });
         }
 

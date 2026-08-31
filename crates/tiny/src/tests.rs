@@ -461,7 +461,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
 
             assert!(!ui.user_tab_exists(SERV_NAME, "SledServ"));
             assert!(ui.pending_sledserv_origins().is_empty());
-            assert!(ui.intentional_shutdown_pending(SERV_NAME));
+            assert!(!ui.intentional_shutdown_pending(SERV_NAME));
             tui.draw();
             let output = libtiny_tui::test_utils::buffer_str(
                 &tui.get_front_buffer(),
@@ -475,6 +475,19 @@ fn test_sledserv_response_is_local_to_command_origin() {
             ));
 
             snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: None,
+                    cmd: Cmd::ERROR {
+                        msg: "SLEDTEAM_SHUTDOWN Sledteam runtime is shutting down".to_owned(),
+                    },
+                }))
+                .await
+                .unwrap();
+            yield_(2).await;
+            assert!(ui.intentional_shutdown_pending(SERV_NAME));
+
+            snd_conn_ev
                 .send(client::Event::ConnectionClosed)
                 .await
                 .unwrap();
@@ -482,10 +495,16 @@ fn test_sledserv_response_is_local_to_command_origin() {
             yield_(5).await;
 
             assert!(!ui.intentional_shutdown_pending(SERV_NAME));
-            assert!(matches!(
-                rcv_tui_ev.recv().await,
-                Some(libtiny_common::Event::Quit { msg: None })
-            ));
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while let Some(event) = rcv_tui_ev.recv().await {
+                    if matches!(event, libtiny_common::Event::Quit { msg: None }) {
+                        return;
+                    }
+                }
+                panic!("Tiny UI event stream ended without a quit event");
+            })
+            .await
+            .expect("initiating Tiny session should exit");
         },
     )
 }
@@ -569,6 +588,50 @@ fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
             assert!(output.contains("Connection closed"));
             assert!(output.contains("Disconnected. Will try to reconnect in"));
             assert!(output.contains("30 seconds."));
+            drop(snd_input_ev);
+        },
+    )
+}
+
+#[test]
+fn test_server_shutdown_marker_exits_a_session_that_did_not_request_shutdown() {
+    run_test(
+        "sibling".to_owned(),
+        |TestSetup {
+             snd_input_ev,
+             snd_conn_ev,
+             mut rcv_tui_ev,
+             ui,
+             ..
+         }| async move {
+            assert!(ui.pending_sledserv_origins().is_empty());
+            snd_conn_ev
+                .send(client::Event::Msg(Msg {
+                    tags: Vec::new(),
+                    pfx: None,
+                    cmd: Cmd::ERROR {
+                        msg: "SLEDTEAM_SHUTDOWN Sledteam runtime is shutting down".to_owned(),
+                    },
+                }))
+                .await
+                .unwrap();
+            snd_conn_ev
+                .send(client::Event::ConnectionClosed)
+                .await
+                .unwrap();
+            yield_(5).await;
+
+            assert!(!ui.intentional_shutdown_pending(SERV_NAME));
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while let Some(event) = rcv_tui_ev.recv().await {
+                    if matches!(event, libtiny_common::Event::Quit { msg: None }) {
+                        return;
+                    }
+                }
+                panic!("Tiny UI event stream ended without a quit event");
+            })
+            .await
+            .expect("sibling Tiny session should exit");
             drop(snd_input_ev);
         },
     )

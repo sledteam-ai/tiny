@@ -25,7 +25,6 @@ struct PendingRequest {
 pub(crate) struct LocalResponse {
     pub(crate) origin: MsgSource,
     pub(crate) lines: Vec<String>,
-    pub(crate) intentional_shutdown: bool,
 }
 
 #[derive(Deserialize)]
@@ -96,12 +95,9 @@ impl PendingRequests {
         let request = pending.remove(idx).unwrap();
         drop(pending);
 
-        let intentional_shutdown = response.command == "runtime.shutdown"
-            && matches!(&response.outcome, Outcome::Ok { .. });
         Some(LocalResponse {
             origin: request.origin,
             lines: format_response(response, &request.command_label),
-            intentional_shutdown,
         })
     }
 
