@@ -46,6 +46,8 @@ enum Outcome {
 struct ResponseError {
     code: String,
     message: String,
+    #[serde(default)]
+    usage: Vec<String>,
 }
 
 impl PendingRequests {
@@ -113,10 +115,26 @@ impl PendingRequests {
 
 fn format_response(response: Response, command_label: &str) -> Vec<String> {
     match response.outcome {
-        Outcome::Error { error } => vec![format!(
-            "Sledteam {}: {} ({})",
-            response.command, error.message, error.code
-        )],
+        Outcome::Error { error } if !error.usage.is_empty() => error
+            .usage
+            .into_iter()
+            .enumerate()
+            .map(|(index, form)| {
+                if index == 0 {
+                    format!("Usage: /{form}")
+                } else {
+                    format!("       /{form}")
+                }
+            })
+            .collect(),
+        Outcome::Error { error } => {
+            log::debug!(
+                "SledServ command error: command={}, code={}",
+                response.command,
+                error.code
+            );
+            vec![error.message]
+        }
         Outcome::Ok { .. } if response.command == "runtime.shutdown" => {
             vec!["Shutting down Sledteam…".to_owned()]
         }
@@ -369,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn shutdown_error_uses_generic_structured_error_message() {
+    fn shutdown_error_shows_only_the_user_facing_message() {
         let pending = PendingRequests::default();
         pending.record(channel("irc", "#01J00000000000000000000000"), "shutdown");
 
@@ -381,11 +399,90 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(
-            response.lines,
-            ["Sledteam runtime.shutdown: Could not contact the runtime. (shutdown_request_failed)"]
-        );
+        assert_eq!(response.lines, ["Could not contact the runtime."]);
         assert!(pending.origins().is_empty());
+    }
+
+    #[test]
+    fn syntax_errors_render_usage_without_protocol_details() {
+        let cases = [
+            (
+                "trail",
+                "travel.trail",
+                r#"["trail add <name>","trail list [<expedition>]"]"#,
+                vec![
+                    "Usage: /trail add <name>",
+                    "       /trail list [<expedition>]",
+                ],
+            ),
+            (
+                "expedition",
+                "travel.expedition",
+                r#"["expedition add <name> --project-root <absolute-project-root>","expedition list"]"#,
+                vec![
+                    "Usage: /expedition add <name> --project-root <absolute-project-root>",
+                    "       /expedition list",
+                ],
+            ),
+            (
+                "span",
+                "travel.span",
+                r#"["span add <name>","span list [<trail>|<expedition>/<trail>/]"]"#,
+                vec![
+                    "Usage: /span add <name>",
+                    "       /span list [<trail>|<expedition>/<trail>/]",
+                ],
+            ),
+            (
+                "shutdown foo",
+                "runtime.shutdown",
+                r#"["shutdown"]"#,
+                vec!["Usage: /shutdown"],
+            ),
+        ];
+
+        for (request, command, usage, expected) in cases {
+            let pending = PendingRequests::default();
+            pending.record(channel("irc", "#commands"), request);
+            let packet = format!(
+                r#"{{"schema_version":1,"command":"{command}","status":"error","error":{{"code":"invalid_command_syntax","message":"Invalid command syntax.","usage":{usage}}}}}"#
+            );
+            let response = pending.consume("irc", NICK, &packet).unwrap();
+            assert_eq!(response.lines, expected, "{request}");
+            assert!(response.lines.iter().all(|line| {
+                !line.contains("SledServ")
+                    && !line.contains("invalid_command_syntax")
+                    && !line.contains("travel.")
+                    && !line.contains("runtime.")
+            }));
+        }
+    }
+
+    #[test]
+    fn unknown_and_domain_errors_keep_their_readable_messages() {
+        for (request, command, code, message) in [
+            (
+                "bearings",
+                "sledserv.command",
+                "unknown_command",
+                "Unknown command: /bearings",
+            ),
+            (
+                "trail list missing",
+                "travel.trail.list",
+                "expedition_not_found",
+                "An expedition named \"missing\" was not found.",
+            ),
+        ] {
+            let pending = PendingRequests::default();
+            pending.record(channel("irc", "#commands"), request);
+            let packet = format!(
+                r#"{{"schema_version":1,"command":"{command}","status":"error","error":{{"code":"{code}","message":"{}"}}}}"#,
+                message.replace('"', "\\\"")
+            );
+            let response = pending.consume("irc", NICK, &packet).unwrap();
+            assert_eq!(response.lines, [message]);
+        }
     }
 
     #[test]

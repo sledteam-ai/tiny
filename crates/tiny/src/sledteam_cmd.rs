@@ -26,7 +26,7 @@ fn ets(args: CmdArgs) {
     if !args.args.is_empty() {
         return args
             .ui
-            .add_client_err_msg(&format!("Usage: {}", ETS_CMD.usage), &MsgTarget::CurrentTab);
+            .add_client_err_msg("Usage: /ets", &MsgTarget::CurrentTab);
     }
 
     send_sledserv(args, "ets");
@@ -74,10 +74,9 @@ static SHUTDOWN_CMD: Cmd = Cmd {
 
 fn shutdown(args: CmdArgs) {
     if !args.args.is_empty() {
-        return args.ui.add_client_err_msg(
-            &format!("Usage: {}", SHUTDOWN_CMD.usage),
-            &MsgTarget::CurrentTab,
-        );
+        return args
+            .ui
+            .add_client_err_msg("Usage: /shutdown", &MsgTarget::CurrentTab);
     }
 
     send_sledserv(args, "shutdown");

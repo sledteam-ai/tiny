@@ -584,7 +584,8 @@ fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
                 DEFAULT_TUI_WIDTH,
                 HEIGHT,
             );
-            assert!(output.contains("shutdown_request_failed"));
+            assert!(output.contains("Could not contact the runtime."));
+            assert!(!output.contains("shutdown_request_failed"));
             assert!(output.contains("Connection closed"));
             assert!(output.contains("Disconnected. Will try to reconnect in"));
             assert!(output.contains("30 seconds."));
