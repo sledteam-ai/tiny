@@ -31,6 +31,7 @@ fn main() {
         servers: server_args,
         config_path,
         sledteam_session,
+        sledteam_vocal,
     } = cli::parse();
     let sledteam_session = match sledteam_session
         .as_deref()
@@ -84,10 +85,17 @@ fn main() {
                 };
 
                 let config::Config {
-                    servers,
+                    mut servers,
                     defaults,
                     log_dir,
                 } = config;
+
+                if let Some(endpoint) = sledteam_vocal {
+                    for server in &mut servers {
+                        server.addr.clone_from(&endpoint.host);
+                        server.port = endpoint.port;
+                    }
+                }
 
                 let servers = if !server_args.is_empty() {
                     // Connect only to servers that match at least one of the given patterns

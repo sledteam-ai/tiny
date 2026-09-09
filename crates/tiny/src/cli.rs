@@ -14,6 +14,15 @@ pub(crate) struct Args {
 
     /// One-launch Sledteam terrain snapshot encoded as JSON.
     pub(crate) sledteam_session: Option<String>,
+
+    /// One-launch Sledteam Vocal endpoint override.
+    pub(crate) sledteam_vocal: Option<VocalEndpoint>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct VocalEndpoint {
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
 /// Parses command line arguments and handles `--version` and `--help`.
@@ -21,6 +30,7 @@ pub(crate) fn parse() -> Args {
     let mut servers: Vec<String> = Vec::new();
     let mut config_path: Option<PathBuf> = None;
     let mut sledteam_session: Option<String> = None;
+    let mut sledteam_vocal = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -65,6 +75,21 @@ pub(crate) fn parse() -> Args {
             }
         }
 
+        if arg == "--sledteam-vocal" {
+            match args.next().and_then(|value| parse_vocal_endpoint(&value)) {
+                Some(endpoint) => {
+                    sledteam_vocal = Some(endpoint);
+                    continue;
+                }
+                None => {
+                    eprintln!(
+                        "Error: The argument '--sledteam-vocal <HOST:PORT>' requires a valid endpoint"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+
         if arg.starts_with('-') {
             eprintln!("Error: Found argument '{arg}' which wasn't expected");
             eprintln!();
@@ -79,7 +104,24 @@ pub(crate) fn parse() -> Args {
         servers,
         config_path,
         sledteam_session,
+        sledteam_vocal,
     }
+}
+
+fn parse_vocal_endpoint(value: &str) -> Option<VocalEndpoint> {
+    let (host, port) = value.rsplit_once(':')?;
+    let host = host.trim_matches(['[', ']']);
+    if host.is_empty() {
+        return None;
+    }
+    let port = port.parse().ok()?;
+    if port == 0 {
+        return None;
+    }
+    Some(VocalEndpoint {
+        host: host.to_owned(),
+        port,
+    })
 }
 
 fn print_version() {
@@ -107,7 +149,25 @@ ARGS:
 OPTIONS:
     -c, --config <FILE>           Use this config file
         --sledteam-session <JSON> Use one launch-time Sledteam terrain snapshot
+        --sledteam-vocal <HOST:PORT>
+                                  Override the Vocal endpoint for this launch
     -h, --help             Print help information
     -V, --version          Print version information",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{VocalEndpoint, parse_vocal_endpoint};
+
+    #[test]
+    fn parses_an_alternate_sledteam_vocal_endpoint() {
+        assert_eq!(
+            parse_vocal_endpoint("127.0.0.1:17667"),
+            Some(VocalEndpoint {
+                host: "127.0.0.1".into(),
+                port: 17667,
+            })
+        );
+    }
 }
