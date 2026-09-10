@@ -214,8 +214,9 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
                 && ctcp.is_none()
             {
                 if let Some(reply) = ui.consume_sledserv_reply(serv, sender, &msg) {
-                    if let crate::ui::SledservReply::Join(ulid) = reply {
+                    if let crate::ui::SledservReply::Join { ulid, label } = reply {
                         if crate::sledteam_session::is_canonical_ulid(&ulid) {
+                            ui.set_sledteam_channel_label(&ulid, label);
                             crate::cmd::join_canonical(client, ui, serv, &ulid);
                         } else {
                             ui.show_command_feedback(

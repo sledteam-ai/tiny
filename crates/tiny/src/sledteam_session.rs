@@ -3,7 +3,9 @@
 //! The snapshot is a one-shot input from Sled. Canonical IRC channel names
 //! remain the keys; terrain kinds and labels exist only for presentation.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use libtiny_common::{ChanName, ChanNameRef};
 use serde::Deserialize;
@@ -13,7 +15,7 @@ const SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SledteamSession {
     terrain: Vec<TerrainChannel>,
-    labels: HashMap<ChanName, String>,
+    labels: Rc<RefCell<HashMap<ChanName, String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,10 +63,13 @@ impl SledteamSession {
                 ));
             }
             let channel = ChanName::new(entry.channel);
-            if session.labels.contains_key(&channel) {
+            if session.labels.borrow().contains_key(&channel) {
                 return Err(format!("duplicate terrain channel {}", channel.display()));
             }
-            session.labels.insert(channel.clone(), entry.label);
+            session
+                .labels
+                .borrow_mut()
+                .insert(channel.clone(), entry.label);
             session.terrain.push(TerrainChannel {
                 channel,
                 kind: entry.kind,
@@ -80,11 +85,16 @@ impl SledteamSession {
             .collect()
     }
 
-    pub(crate) fn display_channel<'a>(&'a self, channel: &'a ChanNameRef) -> &'a str {
+    pub(crate) fn set_channel_label(&self, channel: ChanName, label: String) {
+        self.labels.borrow_mut().insert(channel, label);
+    }
+
+    pub(crate) fn display_channel(&self, channel: &ChanNameRef) -> String {
         self.labels
+            .borrow()
             .get(channel)
-            .map(String::as_str)
-            .unwrap_or_else(|| channel.display())
+            .cloned()
+            .unwrap_or_else(|| channel.display().to_owned())
     }
 }
 
@@ -154,5 +164,29 @@ mod tests {
             r##"{"schema_version":1,"terrain":[{"channel":"#01J00000000000000000000000","kind":"trail","label":"one"},{"channel":"#01J00000000000000000000000","kind":"span","label":"two"}]}"##
         )
         .is_err());
+    }
+
+    #[test]
+    fn runtime_labels_share_the_bootstrap_lookup_and_preserve_fallbacks() {
+        let session = SledteamSession::parse(
+            r##"{"schema_version":1,"terrain":[{"channel":"#01J00000000000000000000000","kind":"expedition","label":"camp"}]}"##,
+        )
+        .unwrap();
+        let runtime_view = session.clone();
+        let meter = ChanName::new("#01J00000000000000000000001".to_owned());
+        let tract = ChanName::new("#01J00000000000000000000002".to_owned());
+        let unknown = ChanName::new("#01J00000000000000000000003".to_owned());
+        let wheel = ChanName::new("#01J00000000000000000000004".to_owned());
+
+        runtime_view.set_channel_label(meter.clone(), "meter".to_owned());
+        runtime_view.set_channel_label(tract.clone(), "Staging Test Trail".to_owned());
+        runtime_view.set_channel_label(wheel.clone(), "wheel".to_owned());
+
+        assert_eq!(session.display_channel(&session.channels()[0]), "camp");
+        assert_eq!(session.display_channel(&meter), "meter");
+        assert_eq!(session.display_channel(&tract), "Staging Test Trail");
+        assert_eq!(session.display_channel(&wheel), "wheel");
+        assert_eq!(session.display_channel(&unknown), unknown.display());
+        assert_eq!(meter.display(), "#01J00000000000000000000001");
     }
 }

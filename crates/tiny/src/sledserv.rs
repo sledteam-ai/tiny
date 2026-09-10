@@ -34,6 +34,7 @@ pub(crate) struct LocalResponse {
     pub(crate) lines: Vec<String>,
     pub(crate) is_feedback: bool,
     pub(crate) join_ulid: Option<String>,
+    pub(crate) join_label: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -122,19 +123,23 @@ impl PendingRequests {
         drop(pending);
 
         let is_feedback = matches!(&response.outcome, Outcome::Error { .. });
-        let join_ulid = match (&request.continuation, &response.outcome) {
+        let join_resolution = match (&request.continuation, &response.outcome) {
             (Continuation::JoinChannel, Outcome::Ok { data: Some(data) }) => {
                 #[derive(Deserialize)]
                 struct ResolvedChannel {
                     ulid: String,
+                    label: String,
                 }
                 serde_yaml::from_value::<ResolvedChannel>(data.clone())
                     .ok()
-                    .map(|resolved| resolved.ulid)
-                    .filter(|ulid| crate::sledteam_session::is_canonical_ulid(ulid))
+                    .filter(|resolved| crate::sledteam_session::is_canonical_ulid(&resolved.ulid))
             }
             _ => None,
         };
+        let join_ulid = join_resolution
+            .as_ref()
+            .map(|resolved| resolved.ulid.clone());
+        let join_label = join_resolution.map(|resolved| resolved.label);
         let lines = match (request.continuation, &response.outcome, &join_ulid) {
             (Continuation::JoinChannel, Outcome::Ok { .. }, Some(_)) => Vec::new(),
             (Continuation::JoinChannel, Outcome::Ok { .. }, None) => {
@@ -149,6 +154,7 @@ impl PendingRequests {
                 || (matches!(request.continuation, Continuation::JoinChannel)
                     && join_ulid.is_none()),
             join_ulid,
+            join_label,
         })
     }
 
@@ -710,10 +716,12 @@ mod tests {
             response.join_ulid.as_deref(),
             Some("01J00000000000000000000000")
         );
+        assert_eq!(response.join_label.as_deref(), Some("wheel"));
 
         pending.record_join(channel("irc", "#current"), "channel resolve wheel");
         let response = pending.consume("irc", NICK, r#"{"schema_version":1,"command":"channel.resolve","status":"ok","data":{"ulid":"not-a-ulid","label":"wheel"}}"#).unwrap();
         assert!(response.join_ulid.is_none());
+        assert!(response.join_label.is_none());
         assert!(response.is_feedback);
     }
 

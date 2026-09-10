@@ -70,7 +70,7 @@ impl UI {
         self.ui.new_chan_tab_with_alias(
             serv,
             chan,
-            Some(self.sledteam_session.display_channel(chan).to_owned()),
+            Some(self.sledteam_session.display_channel(chan)),
         );
         if let Some(logger) = &self.logger {
             logger.new_chan_tab(serv, chan);
@@ -101,7 +101,7 @@ impl UI {
             target,
             highlight,
             is_action,
-            channel_label,
+            channel_label.as_deref(),
         );
         if let Some(logger) = &self.logger {
             logger.add_privmsg(sender, msg, ts, target, highlight, is_action);
@@ -126,7 +126,7 @@ impl UI {
             ts,
             target,
             highlight,
-            channel_label,
+            channel_label.as_deref(),
         );
         if let Some(logger) = &self.logger {
             for line in lines {
@@ -168,8 +168,13 @@ impl UI {
         self.ui.current_tab()
     }
 
-    pub(crate) fn display_channel<'a>(&'a self, channel: &'a ChanNameRef) -> &'a str {
+    pub(crate) fn display_channel(&self, channel: &ChanNameRef) -> String {
         self.sledteam_session.display_channel(channel)
+    }
+
+    pub(crate) fn set_sledteam_channel_label(&self, ulid: &str, label: String) {
+        self.sledteam_session
+            .set_channel_label(libtiny_common::ChanName::new(format!("#{ulid}")), label);
     }
 
     pub(crate) fn record_sledserv_request(&self, origin: MsgSource, command: &str) {
@@ -190,6 +195,7 @@ impl UI {
             return None;
         };
         let join_ulid = response.join_ulid;
+        let join_label = response.join_label;
         let target = response.origin.to_target();
         if response.is_feedback {
             self.show_command_feedback(&response.lines, &target);
@@ -199,7 +205,10 @@ impl UI {
             }
         }
         Some(match join_ulid {
-            Some(ulid) => SledservReply::Join(ulid),
+            Some(ulid) => SledservReply::Join {
+                ulid,
+                label: join_label.expect("join resolution label accompanies ULID"),
+            },
             None => SledservReply::Displayed,
         })
     }
@@ -431,5 +440,5 @@ mod tests {
 }
 pub(crate) enum SledservReply {
     Displayed,
-    Join(String),
+    Join { ulid: String, label: String },
 }
