@@ -22,6 +22,8 @@ pub(crate) trait Client {
     fn get_nick(&self) -> String;
 
     fn is_nick_accepted(&self) -> bool;
+
+    fn join(&self, _chan: &ChanNameRef) {}
 }
 
 impl Client for libtiny_client::Client {
@@ -35,6 +37,11 @@ impl Client for libtiny_client::Client {
 
     fn is_nick_accepted(&self) -> bool {
         self.is_nick_accepted()
+    }
+
+    fn join(&self, chan: &ChanNameRef) {
+        let mut client = (*self).clone();
+        libtiny_client::Client::join(&mut client, std::iter::once(chan));
     }
 }
 
@@ -205,9 +212,20 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
                 && matches!(target, wire::MsgTarget::User(ref target) if target == &client.get_nick())
                 && !is_notice
                 && ctcp.is_none()
-                && ui.consume_sledserv_reply(serv, sender, &msg)
             {
-                return;
+                if let Some(reply) = ui.consume_sledserv_reply(serv, sender, &msg) {
+                    if let crate::ui::SledservReply::Join(ulid) = reply {
+                        if crate::sledteam_session::is_canonical_ulid(&ulid) {
+                            crate::cmd::join_canonical(client, ui, serv, &ulid);
+                        } else {
+                            ui.show_command_feedback(
+                                &["SledServ returned an invalid channel ULID.".to_owned()],
+                                &MsgTarget::Server { serv },
+                            );
+                        }
+                    }
+                    return;
+                }
             }
 
             if ctcp == Some(wire::CTCP::Version) {

@@ -176,10 +176,20 @@ impl UI {
         self.sledserv_requests.record(origin, command);
     }
 
-    pub(crate) fn consume_sledserv_reply(&self, serv: &str, sender: &str, msg: &str) -> bool {
+    pub(crate) fn record_sledserv_join(&self, origin: MsgSource, command: &str) {
+        self.sledserv_requests.record_join(origin, command);
+    }
+
+    pub(crate) fn consume_sledserv_reply(
+        &self,
+        serv: &str,
+        sender: &str,
+        msg: &str,
+    ) -> Option<SledservReply> {
         let Some(response) = self.sledserv_requests.consume(serv, sender, msg) else {
-            return false;
+            return None;
         };
+        let join_ulid = response.join_ulid;
         let target = response.origin.to_target();
         if response.is_feedback {
             self.show_command_feedback(&response.lines, &target);
@@ -188,7 +198,10 @@ impl UI {
                 self.add_client_msg(&line, &target);
             }
         }
-        true
+        Some(match join_ulid {
+            Some(ulid) => SledservReply::Join(ulid),
+            None => SledservReply::Displayed,
+        })
     }
 
     pub(crate) fn mark_intentional_shutdown(&self, serv: &str) {
@@ -415,4 +428,8 @@ mod tests {
                 .unwrap();
         });
     }
+}
+pub(crate) enum SledservReply {
+    Displayed,
+    Join(String),
 }

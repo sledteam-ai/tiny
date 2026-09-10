@@ -88,7 +88,7 @@ impl SledteamSession {
     }
 }
 
-fn is_canonical_ulid(value: &str) -> bool {
+pub(crate) fn is_canonical_ulid(value: &str) -> bool {
     value.len() == 26
         && value.as_bytes()[0].is_ascii_digit()
         && value.as_bytes()[0] <= b'7'

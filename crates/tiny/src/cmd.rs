@@ -3,7 +3,6 @@ use crate::ui::UI;
 use crate::utils;
 use libtiny_client::{Client, ServerInfo};
 use libtiny_common::{ChanNameRef, CommandInfo, MsgSource, MsgTarget};
-use libtiny_tui::config::Chan;
 
 use std::borrow::Borrow;
 
@@ -413,6 +412,21 @@ static JOIN_CMD: Cmd = Cmd {
     usage: "`/join <chan1> [-ignore] [-notify [off|mentions|messages]],<chan2>...` or `/join` in a channel tab to rejoin",
 };
 
+#[derive(Debug, Eq, PartialEq)]
+enum JoinArgument<'a> {
+    Canonical(&'a str),
+    Label(&'a str),
+}
+
+fn classify_join_argument(argument: &str) -> JoinArgument<'_> {
+    let normalized = argument.strip_prefix('#').unwrap_or(argument);
+    if crate::sledteam_session::is_canonical_ulid(normalized) {
+        JoinArgument::Canonical(normalized)
+    } else {
+        JoinArgument::Label(normalized)
+    }
+}
+
 fn join(args: CmdArgs) {
     let CmdArgs {
         args,
@@ -431,25 +445,22 @@ fn join(args: CmdArgs) {
         );
     }
 
-    let chans = args
-        .split(',')
-        .map(str::trim)
-        .filter_map(|c| match Chan::from_cmd_args(c) {
-            Ok(c) => Some(c),
-            Err(err) => {
-                ui.add_client_err_msg(&err, &MsgTarget::CurrentTab);
-                None
-            }
-        })
-        .collect::<Vec<Chan>>();
-
-    let chans = if chans.is_empty() {
+    let argument = args.trim();
+    if argument.is_empty() {
         match ui.current_tab() {
             None => return,
             Some(MsgSource::Chan { serv, chan }) => {
                 // Rejoin current tab's channel.
-                let config = ui.get_tab_config(&serv, Some(chan.as_ref()));
-                vec![Chan::WithConfig { name: chan, config }]
+                let Some(client) = find_client(clients, &serv) else {
+                    return;
+                };
+                join_canonical(
+                    client,
+                    ui,
+                    &serv,
+                    chan.as_ref().display().trim_start_matches('#'),
+                );
+                return;
             }
             Some(MsgSource::Serv { .. } | MsgSource::User { .. }) => {
                 return ui.add_client_err_msg(
@@ -458,33 +469,32 @@ fn join(args: CmdArgs) {
                 );
             }
         }
-    } else {
-        chans
-    };
+    }
 
     let serv = src.serv_name();
     match find_client(clients, serv) {
-        Some(client) => {
-            let iter_ref = chans.iter().map(|c| c.name());
-            // set tab configs of new channel tabs (creates new tab)
-            for chan in &chans {
-                match chan {
-                    Chan::Name(name) => {
-                        let config = ui.get_tab_config(serv, Some(name.as_ref()));
-                        ui.set_tab_config(serv, Some(name), config)
-                    }
-                    Chan::WithConfig { name, config } => {
-                        ui.set_tab_config(serv, Some(name), config.to_owned())
-                    }
+        Some(client) => match classify_join_argument(argument) {
+            JoinArgument::Canonical(ulid) => join_canonical(client, ui, serv, ulid),
+            JoinArgument::Label(label) => {
+                let command = format!("channel resolve {label}");
+                for chunk in client.split_privmsg(crate::sledserv::NICK.len(), &command) {
+                    client.privmsg(crate::sledserv::NICK, chunk, false);
+                    ui.record_sledserv_join(src.clone(), &command);
                 }
             }
-            client.join(iter_ref);
-        }
+        },
         None => ui.add_client_err_msg(
             &format!("Can't join: Not connected to server {}", src.serv_name()),
             &MsgTarget::CurrentTab,
         ),
     }
+}
+
+pub(crate) fn join_canonical(client: &dyn crate::conn::Client, ui: &UI, serv: &str, ulid: &str) {
+    let channel = libtiny_common::ChanName::new(format!("#{ulid}"));
+    let config = ui.get_tab_config(serv, Some(channel.as_ref()));
+    ui.set_tab_config(serv, Some(&channel), config);
+    client.join(channel.as_ref());
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -955,6 +965,29 @@ fn test_msg_args() {
     assert_eq!(split_msg_args("foo, bar"), Some(("foo,", "bar"))); // nick not valid according to RFC but whatever
     assert_eq!(split_msg_args("foo ,bar"), Some(("foo", ",bar")));
     assert_eq!(split_msg_args("#blah blah"), None);
+}
+
+#[test]
+fn join_arguments_distinguish_canonical_channels_from_complete_labels() {
+    const ULID: &str = "01J00000000000000000000000";
+    assert_eq!(classify_join_argument(ULID), JoinArgument::Canonical(ULID));
+    let prefixed = format!("#{ULID}");
+    assert_eq!(
+        classify_join_argument(&prefixed),
+        JoinArgument::Canonical(ULID)
+    );
+    assert_eq!(
+        classify_join_argument("wheel"),
+        JoinArgument::Label("wheel")
+    );
+    assert_eq!(
+        classify_join_argument("meter"),
+        JoinArgument::Label("meter")
+    );
+    assert_eq!(
+        classify_join_argument("Staging Test Trail"),
+        JoinArgument::Label("Staging Test Trail")
+    );
 }
 
 #[test]

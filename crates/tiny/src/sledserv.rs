@@ -20,12 +20,20 @@ struct PendingRequest {
     origin: MsgSource,
     response_command_prefix: String,
     command_label: String,
+    continuation: Continuation,
+}
+
+#[derive(Clone, Copy)]
+enum Continuation {
+    Display,
+    JoinChannel,
 }
 
 pub(crate) struct LocalResponse {
     pub(crate) origin: MsgSource,
     pub(crate) lines: Vec<String>,
     pub(crate) is_feedback: bool,
+    pub(crate) join_ulid: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +61,19 @@ struct ResponseError {
 
 impl PendingRequests {
     pub(crate) fn record(&self, origin: MsgSource, command: &str) {
+        self.record_with_continuation(origin, command, Continuation::Display);
+    }
+
+    pub(crate) fn record_join(&self, origin: MsgSource, command: &str) {
+        self.record_with_continuation(origin, command, Continuation::JoinChannel);
+    }
+
+    fn record_with_continuation(
+        &self,
+        origin: MsgSource,
+        command: &str,
+        continuation: Continuation,
+    ) {
         let command_label = command.trim_start_matches('/');
         let command_name = command_label
             .split_whitespace()
@@ -60,12 +81,14 @@ impl PendingRequests {
             .unwrap_or(command_label);
         let response_command_prefix = match command_name {
             "shutdown" => "runtime.shutdown".to_owned(),
+            "channel" => "channel.resolve".to_owned(),
             _ => format!("travel.{command_name}"),
         };
         self.inner.borrow_mut().push_back(PendingRequest {
             origin,
             response_command_prefix,
             command_label: command_label.to_owned(),
+            continuation,
         });
     }
 
@@ -99,10 +122,33 @@ impl PendingRequests {
         drop(pending);
 
         let is_feedback = matches!(&response.outcome, Outcome::Error { .. });
+        let join_ulid = match (&request.continuation, &response.outcome) {
+            (Continuation::JoinChannel, Outcome::Ok { data: Some(data) }) => {
+                #[derive(Deserialize)]
+                struct ResolvedChannel {
+                    ulid: String,
+                }
+                serde_yaml::from_value::<ResolvedChannel>(data.clone())
+                    .ok()
+                    .map(|resolved| resolved.ulid)
+                    .filter(|ulid| crate::sledteam_session::is_canonical_ulid(ulid))
+            }
+            _ => None,
+        };
+        let lines = match (request.continuation, &response.outcome, &join_ulid) {
+            (Continuation::JoinChannel, Outcome::Ok { .. }, Some(_)) => Vec::new(),
+            (Continuation::JoinChannel, Outcome::Ok { .. }, None) => {
+                vec!["SledServ returned an invalid channel resolution.".to_owned()]
+            }
+            _ => format_response(response, &request.command_label),
+        };
         Some(LocalResponse {
             origin: request.origin,
-            lines: format_response(response, &request.command_label),
-            is_feedback,
+            lines,
+            is_feedback: is_feedback
+                || (matches!(request.continuation, Continuation::JoinChannel)
+                    && join_ulid.is_none()),
+            join_ulid,
         })
     }
 
@@ -653,5 +699,40 @@ mod tests {
             ),
             ["Sledteam travel.expedition.add:", "name: Moonshot"]
         );
+    }
+
+    #[test]
+    fn channel_resolution_continuation_returns_only_a_canonical_ulid() {
+        let pending = PendingRequests::default();
+        pending.record_join(channel("irc", "#current"), "channel resolve wheel");
+        let response = pending.consume("irc", NICK, r#"{"schema_version":1,"command":"channel.resolve","status":"ok","data":{"ulid":"01J00000000000000000000000","label":"wheel"}}"#).unwrap();
+        assert_eq!(
+            response.join_ulid.as_deref(),
+            Some("01J00000000000000000000000")
+        );
+
+        pending.record_join(channel("irc", "#current"), "channel resolve wheel");
+        let response = pending.consume("irc", NICK, r#"{"schema_version":1,"command":"channel.resolve","status":"ok","data":{"ulid":"not-a-ulid","label":"wheel"}}"#).unwrap();
+        assert!(response.join_ulid.is_none());
+        assert!(response.is_feedback);
+    }
+
+    #[test]
+    fn channel_resolution_failures_never_resume_a_join() {
+        for code in [
+            "channel_not_found",
+            "channel_ambiguous",
+            "channel_resolution_failed",
+        ] {
+            let pending = PendingRequests::default();
+            pending.record_join(channel("irc", "#current"), "channel resolve Some label");
+            let packet = format!(
+                r#"{{"schema_version":1,"command":"channel.resolve","status":"error","error":{{"code":"{code}","message":"resolution failed"}}}}"#
+            );
+            let response = pending.consume("irc", NICK, &packet).unwrap();
+            assert!(response.join_ulid.is_none());
+            assert!(response.is_feedback);
+            assert_eq!(response.lines, ["resolution failed"]);
+        }
     }
 }
