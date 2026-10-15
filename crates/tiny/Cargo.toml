@@ -25,6 +25,7 @@ libtiny_tui = { path = "../libtiny_tui", default-features = false }
 libtiny_wire = { path = "../libtiny_wire" }
 log = "0.4"
 serde = { version = "1.0.196", features = ["derive"] }
+serde_json = "1.0"
 serde_yaml = "0.8"
 shell-words = "1.1.0"
 shellexpand = "3.1.2"
