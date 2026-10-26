@@ -265,6 +265,8 @@ fn close(args: CmdArgs) {
             // ignore
         }
         MsgSource::Serv { serv } => {
+            ui.joins.end_connection(&serv);
+            ui.clear_sledserv_requests(&serv);
             ui.close_server_tab(&serv);
             let client_idx = find_client_idx(clients, &serv).unwrap();
             // TODO: this probably won't close the connection?
@@ -276,6 +278,7 @@ fn close(args: CmdArgs) {
             }
         }
         MsgSource::Chan { serv, chan } => {
+            ui.joins.cancel(&serv, &chan);
             ui.close_chan_tab(&serv, chan.borrow());
             let client_idx = find_client_idx(clients, &serv).unwrap();
             if args.is_empty() {
@@ -329,6 +332,8 @@ fn reconnect(ui: &UI, clients: &mut [Client], src: MsgSource) {
                 serv: src.serv_name(),
             },
         );
+        ui.joins.end_connection(src.serv_name());
+        ui.clear_sledserv_requests(src.serv_name());
         client.reconnect(None);
     }
 }
@@ -366,6 +371,8 @@ fn connect_(
     // if we already connected to this server reconnect using new port
     if let Some(client) = find_client(clients, serv_name) {
         ui.add_client_msg("Connecting...", &MsgTarget::AllServTabs { serv: serv_name });
+        ui.joins.end_connection(serv_name);
+        ui.clear_sledserv_requests(serv_name);
         client.reconnect(Some(serv_port));
         return;
     }
@@ -477,10 +484,7 @@ fn join(args: CmdArgs) {
             JoinArgument::Canonical(ulid) => join_canonical(client, ui, serv, ulid),
             JoinArgument::Label(label) => {
                 let command = format!("channel resolve {label}");
-                for chunk in client.split_privmsg(crate::sledserv::NICK.len(), &command) {
-                    client.privmsg(crate::sledserv::NICK, chunk, false);
-                    ui.record_sledserv_join(src.clone(), &command);
-                }
+                sledteam::send_request(ui, client, src.clone(), &command, true);
             }
         },
         None => ui.add_client_err_msg(
@@ -490,12 +494,7 @@ fn join(args: CmdArgs) {
     }
 }
 
-pub(crate) fn join_canonical(client: &dyn crate::conn::Client, ui: &UI, serv: &str, ulid: &str) {
-    let channel = libtiny_common::ChanName::new(format!("#{ulid}"));
-    let config = ui.get_tab_config(serv, Some(channel.as_ref()));
-    ui.set_tab_config(serv, Some(&channel), config);
-    client.join(channel.as_ref());
-}
+pub(crate) use crate::joins::join_canonical;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -59,8 +59,13 @@ pub(crate) async fn task_with_linger(
     client: Box<dyn Client>,
     intentional_shutdown_linger: Duration,
 ) {
+    let _connection_lifetime =
+        crate::sledserv::ConnectionLifetime::begin(&ui, client.get_serv_name());
     let mut rcv_ev = ReceiverStream::new(rcv_ev);
     while let Some(ev) = rcv_ev.next().await {
+        if !_connection_lifetime.is_current() {
+            return;
+        }
         if handle_conn_ev(&ui, &*client, ev) {
             // Let the application-wide quit event send the sole Client::quit command. Sending it
             // through this client clone first would close the command receiver before that event.
@@ -73,7 +78,8 @@ pub(crate) async fn task_with_linger(
     }
 }
 
-fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) -> bool {
+pub(crate) fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) -> bool {
+    crate::joins::observe_event(ui, client, &ev);
     use libtiny_client::Event::*;
     match ev {
         ResolvingHost => {
@@ -101,6 +107,7 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) -> bo
             );
         }
         Disconnected => {
+            ui.clear_sledserv_requests(client.get_serv_name());
             let serv = client.get_serv_name();
             ui.add_err_msg(
                 &format!(
@@ -122,6 +129,7 @@ fn handle_conn_ev(ui: &UI, client: &dyn Client, ev: libtiny_client::Event) -> bo
             );
         }
         ConnectionClosed => {
+            ui.clear_sledserv_requests(client.get_serv_name());
             if ui.take_intentional_shutdown(client.get_serv_name()) {
                 return true;
             }
@@ -214,17 +222,7 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
                 && ctcp.is_none()
             {
                 if let Some(reply) = ui.consume_sledserv_reply(serv, sender, &msg) {
-                    if let crate::ui::SledservReply::Join { ulid, label } = reply {
-                        if crate::sledteam_session::is_canonical_ulid(&ulid) {
-                            ui.set_sledteam_channel_label(&ulid, label);
-                            crate::cmd::join_canonical(client, ui, serv, &ulid);
-                        } else {
-                            ui.show_command_feedback(
-                                &["SledServ returned an invalid channel ULID.".to_owned()],
-                                &MsgTarget::Server { serv },
-                            );
-                        }
-                    }
+                    crate::sledserv::apply_reply(client, ui, serv, reply);
                     return;
                 }
             }
@@ -432,8 +430,7 @@ fn handle_irc_msg(ui: &UI, client: &dyn Client, msg: wire::Msg, is_multiline: bo
             };
 
             if nick == client.get_nick() {
-                ui.new_chan_tab(serv, &chan);
-                ui.focus_chan_tab(serv, &chan);
+                crate::joins::own_join(ui, serv, &chan);
             } else {
                 let nick = wire::drop_nick_prefix(&nick);
                 let ts = Some(time::now());

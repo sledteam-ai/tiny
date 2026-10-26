@@ -43,6 +43,7 @@ pub(crate) struct UI {
     ui: TUI,
     logger: Option<Logger>,
     sledserv_requests: PendingRequests,
+    pub(crate) joins: crate::joins::JoinIntents,
     intentional_shutdowns: Rc<RefCell<HashSet<String>>>,
     sledteam_session: SledteamSession,
 }
@@ -53,6 +54,7 @@ impl UI {
             ui,
             logger,
             sledserv_requests: PendingRequests::default(),
+            joins: crate::joins::JoinIntents::default(),
             intentional_shutdowns: Rc::new(RefCell::new(HashSet::new())),
             sledteam_session,
         }
@@ -177,12 +179,27 @@ impl UI {
             .set_channel_label(libtiny_common::ChanName::new(format!("#{ulid}")), label);
     }
 
-    pub(crate) fn record_sledserv_request(&self, origin: MsgSource, command: &str) {
-        self.sledserv_requests.record(origin, command);
+    pub(crate) fn record_sledserv_request(
+        &self,
+        origin: MsgSource,
+        command: &str,
+        request_id: &str,
+    ) -> bool {
+        self.sledserv_requests.record(origin, command, request_id)
     }
 
-    pub(crate) fn record_sledserv_join(&self, origin: MsgSource, command: &str) {
-        self.sledserv_requests.record_join(origin, command);
+    pub(crate) fn record_sledserv_join(
+        &self,
+        origin: MsgSource,
+        command: &str,
+        request_id: &str,
+    ) -> bool {
+        self.sledserv_requests
+            .record_join(origin, command, request_id)
+    }
+
+    pub(crate) fn clear_sledserv_requests(&self, serv: &str) {
+        self.sledserv_requests.clear_server(serv);
     }
 
     pub(crate) fn consume_sledserv_reply(
@@ -192,7 +209,9 @@ impl UI {
         msg: &str,
     ) -> Option<SledservReply> {
         let Some(response) = self.sledserv_requests.consume(serv, sender, msg) else {
-            return None;
+            return (sender.eq_ignore_ascii_case(crate::sledserv::NICK)
+                && crate::sledserv::is_span_creation_response(msg))
+            .then_some(SledservReply::Displayed);
         };
         let join_ulid = response.join_ulid;
         let join_label = response.join_label;
@@ -205,6 +224,10 @@ impl UI {
             }
         }
         Some(match join_ulid {
+            Some(ulid) if response.background_join => SledservReply::BackgroundJoin {
+                ulid,
+                label: join_label.expect("created Span label accompanies ULID"),
+            },
             Some(ulid) => SledservReply::Join {
                 ulid,
                 label: join_label.expect("join resolution label accompanies ULID"),
@@ -441,4 +464,5 @@ mod tests {
 pub(crate) enum SledservReply {
     Displayed,
     Join { ulid: String, label: String },
+    BackgroundJoin { ulid: String, label: String },
 }

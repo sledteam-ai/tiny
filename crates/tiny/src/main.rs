@@ -6,6 +6,7 @@ mod command_metadata;
 mod config;
 mod conn;
 mod debug_logging;
+mod joins;
 mod sledserv;
 mod sledteam_session;
 mod ui;
@@ -266,3 +267,6 @@ mod sledteam_launch_tests {
         assert!(!channels.iter().any(|channel| channel.display() == "#camp"));
     }
 }
+
+#[cfg(test)]
+mod sledserv_connection_tests;

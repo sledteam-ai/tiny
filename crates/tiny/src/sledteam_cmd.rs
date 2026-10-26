@@ -97,7 +97,19 @@ fn send_sledserv(args: CmdArgs, command: &str) {
         format!("{command} {args}")
     };
     let client = find_client(clients, src.serv_name()).unwrap();
-    let request = encode_request(&src, &msg);
+    send_request(ui, client, src, &msg, false);
+}
+
+pub(super) fn send_request(
+    ui: &crate::ui::UI,
+    client: &mut libtiny_client::Client,
+    src: MsgSource,
+    command: &str,
+    join: bool,
+) {
+    let request_id = ulid::Ulid::new().to_string();
+    // Label resolution previously used a raw request with no Terrain origin.
+    let request = encode_request(&src, command, &request_id, !join);
     if client
         .split_privmsg(crate::sledserv::NICK.len(), &request)
         .next()
@@ -109,20 +121,36 @@ fn send_sledserv(args: CmdArgs, command: &str) {
         );
         return;
     }
+    let recorded = if join {
+        ui.record_sledserv_join(src, command, &request_id)
+    } else {
+        ui.record_sledserv_request(src, command, &request_id)
+    };
+    if !recorded {
+        ui.show_command_feedback(
+            &["Unable to register SledServ request identifier.".to_owned()],
+            &MsgTarget::CurrentTab,
+        );
+        return;
+    }
     client.privmsg(crate::sledserv::NICK, &request, false);
-    ui.record_sledserv_request(src, &msg);
 }
 
 // An address is only a candidate Terrain identity. SledServ determines its kind.
-fn encode_request(src: &MsgSource, command: &str) -> String {
-    let origin = match src {
-        MsgSource::Chan { chan, .. } => chan
+fn encode_request(
+    src: &MsgSource,
+    command: &str,
+    request_id: &str,
+    include_origin: bool,
+) -> String {
+    let origin = match (src, include_origin) {
+        (MsgSource::Chan { chan, .. }, true) => chan
             .display()
             .strip_prefix('#')
             .filter(|id| crate::sledteam_session::is_canonical_ulid(id)),
         _ => None,
     };
-    serde_json::json!({"schema_version":1,"command":command,"origin":origin}).to_string()
+    serde_json::json!({"schema_version":1,"request_id":request_id,"command":command,"origin":origin}).to_string()
 }
 
 #[cfg(test)]
@@ -149,8 +177,13 @@ mod tests {
                 chan: ChanName::new(channel.into()),
             };
             let command = "trail add a \"quoted\" name {with braces}";
-            let value: serde_json::Value =
-                serde_json::from_str(&encode_request(&source, command)).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&encode_request(
+                &source,
+                command,
+                "01J00000000000000000000000",
+                true,
+            ))
+            .unwrap();
             assert_eq!(value["origin"], serde_json::json!(expected));
             assert_eq!(value["command"], command);
         }
@@ -161,8 +194,13 @@ mod tests {
                 nick: "alice".into(),
             },
         ] {
-            let value: serde_json::Value =
-                serde_json::from_str(&encode_request(&source, "ets")).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&encode_request(
+                &source,
+                "ets",
+                "01J00000000000000000000000",
+                true,
+            ))
+            .unwrap();
             assert!(value["origin"].is_null());
         }
     }

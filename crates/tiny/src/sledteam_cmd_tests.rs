@@ -32,7 +32,7 @@ fn test_sledserv_aliases_send_origin_and_preserve_local_placement() {
                         .unwrap();
                 } else if line.starts_with("PRIVMSG ") {
                     privmsgs.push(line);
-                    if privmsgs.len() == 10 {
+                    if privmsgs.len() == 11 {
                         break;
                     }
                 }
@@ -166,9 +166,11 @@ fn test_sledserv_aliases_send_origin_and_preserve_local_placement() {
             &mut clients,
         );
 
+        run_cmd("join wheel", source.clone(), &defaults, &ui, &mut clients);
         assert_eq!(
             ui.pending_sledserv_origins(),
             [
+                source.clone(),
                 source.clone(),
                 source.clone(),
                 source.clone(),
@@ -177,8 +179,20 @@ fn test_sledserv_aliases_send_origin_and_preserve_local_placement() {
             ]
         );
 
+        let mut ids = std::collections::HashSet::new();
+        let messages: Vec<_> = server.await.unwrap().into_iter().map(|line| {
+            let body = line.strip_prefix("PRIVMSG SledServ :").unwrap();
+            if !body.starts_with('{') { return line; }
+            let mut envelope: serde_json::Value = serde_json::from_str(body).unwrap();
+            let id = envelope.as_object_mut().unwrap().remove("request_id").unwrap();
+            let id = id.as_str().unwrap();
+            assert!(id.parse::<ulid::Ulid>().is_ok());
+            assert!(ids.insert(id.to_owned()));
+            format!("PRIVMSG SledServ :{envelope}")
+        }).collect();
+        assert_eq!(ids.len(), 6);
         assert_eq!(
-            server.await.unwrap(),
+            messages,
             vec![
                 format!("PRIVMSG SledServ :{}", serde_json::json!({"schema_version":1,"command":"ets","origin":"01J00000000000000000000000"})).to_owned(),
                 "PRIVMSG SledServ :ets".to_owned(),
@@ -192,9 +206,12 @@ fn test_sledserv_aliases_send_origin_and_preserve_local_placement() {
                 "PRIVMSG SledServ :span add write schema".to_owned(),
                 format!("PRIVMSG SledServ :{}", serde_json::json!({"schema_version":1,"command":"shutdown","origin":"01J00000000000000000000000"})).to_owned(),
                 "PRIVMSG SledServ :shutdown".to_owned(),
+                format!("PRIVMSG SledServ :{}", serde_json::json!({"schema_version":1,"command":"channel resolve wheel","origin":null})),
             ]
         );
 
+        run_cmd("close", MsgSource::Serv { serv: "127.0.0.1".into() }, &defaults, &ui, &mut clients);
+        assert!(ui.pending_sledserv_origins().is_empty());
         drop(snd_input);
     });
 }

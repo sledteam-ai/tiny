@@ -393,7 +393,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 serv: SERV_NAME.to_owned(),
                 chan: origin_chan.clone(),
             };
-            ui.record_sledserv_request(origin.clone(), "ets");
+            ui.record_sledserv_request(origin.clone(), "ets", "01J00000000000000000000000");
 
             // Move away while the request is in flight; receipt must not retarget the result.
             next_tab(&snd_input_ev).await;
@@ -409,7 +409,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                     }),
                     cmd: Cmd::PRIVMSG {
                         target: MsgTarget::User("osa1".to_owned()),
-                        msg: r#"{"schema_version":1,"command":"travel.ets","status":"ok","data":{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"North"},"spans":[]}}"#.to_owned(),
+                        msg: r#"{"schema_version":1,"request_id":"01J00000000000000000000000","command":"travel.ets","status":"ok","data":{"expedition":{"ulid":"E1","name":"Moonshot"},"trail":{"ulid":"T1","name":"North"},"spans":[]}}"#.to_owned(),
                         is_notice: false,
                         ctcp: None,
                     },
@@ -440,7 +440,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                 Err(mpsc::error::TryRecvError::Empty)
             ));
 
-            ui.record_sledserv_request(origin, "shutdown");
+            ui.record_sledserv_request(origin, "shutdown", "01J00000000000000000000000");
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
                     tags: Vec::new(),
@@ -450,7 +450,7 @@ fn test_sledserv_response_is_local_to_command_origin() {
                     }),
                     cmd: Cmd::PRIVMSG {
                         target: MsgTarget::User("osa1".to_owned()),
-                        msg: r#"{"schema_version":1,"command":"runtime.shutdown","status":"ok","data":{"message":"Sledteam shutdown request sent."}}"#.to_owned(),
+                        msg: r#"{"schema_version":1,"request_id":"01J00000000000000000000000","command":"runtime.shutdown","status":"ok","data":{"message":"Sledteam shutdown request sent."}}"#.to_owned(),
                         is_notice: false,
                         ctcp: None,
                     },
@@ -530,6 +530,7 @@ fn incomplete_expedition_shows_usage_as_command_feedback() {
                     serv: SERV_NAME.to_owned(),
                 },
                 "expedition",
+                "01J00000000000000000000000",
             );
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
@@ -540,7 +541,7 @@ fn incomplete_expedition_shows_usage_as_command_feedback() {
                     }),
                     cmd: Cmd::PRIVMSG {
                         target: MsgTarget::User("osa1".to_owned()),
-                        msg: r#"{"schema_version":1,"command":"travel.expedition","status":"error","error":{"code":"invalid_command_syntax","message":"Invalid command syntax.","usage":["expedition add <name> --project-root <absolute-project-root>","expedition list"]}}"#.to_owned(),
+                        msg: r#"{"schema_version":1,"request_id":"01J00000000000000000000000","command":"travel.expedition","status":"error","error":{"code":"invalid_command_syntax","message":"Invalid command syntax.","usage":["expedition add <name> --project-root <absolute-project-root>","expedition list"]}}"#.to_owned(),
                         is_notice: false,
                         ctcp: None,
                     },
@@ -605,6 +606,7 @@ fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
                     serv: SERV_NAME.to_owned(),
                 },
                 "shutdown",
+                "01J00000000000000000000000",
             );
             snd_conn_ev
                 .send(client::Event::Msg(Msg {
@@ -615,7 +617,7 @@ fn test_unexpected_disconnect_and_shutdown_error_keep_reconnect_behavior() {
                     }),
                     cmd: Cmd::PRIVMSG {
                         target: MsgTarget::User("osa1".to_owned()),
-                        msg: r#"{"schema_version":1,"command":"runtime.shutdown","status":"error","error":{"code":"shutdown_request_failed","message":"Could not contact the runtime."}}"#.to_owned(),
+                        msg: r#"{"schema_version":1,"request_id":"01J00000000000000000000000","command":"runtime.shutdown","status":"error","error":{"code":"shutdown_request_failed","message":"Could not contact the runtime."}}"#.to_owned(),
                         is_notice: false,
                         ctcp: None,
                     },
